@@ -5,6 +5,7 @@
 // realm breaks isPlainObject checks. The Client builds ops and sends them over
 // the wire (host-realm JSON); this half only forwards.
 return {
+  inject: ['timer'],
   apply(ctx) {
     const NS = 'llm-pi-ai'
     const REF = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -21,6 +22,19 @@ return {
         if (value !== undefined) out[key] = value
       }
       return out
+    }
+
+    // vm-realm objects fail host isPlainObject checks; null-prototype objects
+    // pass (`proto === null`), which is what lets this half write settings
+    // directly from the sandbox instead of round-tripping through the Client.
+    function plainValue(value) {
+      if (Array.isArray(value)) return value.map(plainValue)
+      if (value !== null && typeof value === 'object') {
+        const out = Object.create(null)
+        for (const k of Object.keys(value)) out[k] = plainValue(value[k])
+        return out
+      }
+      return value
     }
 
     function snapshot() {
@@ -62,6 +76,7 @@ return {
     }
 
     async function handleList() {
+      void syncAll()
       const snap = snapshot()
       const dir = directory()
       const catalogKeys = new Set(dir.filter((d) => d.declared !== true).map((d) => d.provider))
@@ -91,6 +106,7 @@ return {
               ? { thinkingFormat: raw.compat.thinkingFormat }
               : undefined,
             models,
+            syncModels: raw.syncModels === true,
             catalog: catalogKeys.has(key) && !hasOwnEndpoint,
             credential: await credentialOf(ref),
           }))
@@ -124,6 +140,60 @@ return {
       }
       if (apiKey !== undefined) request.apiKey = apiKey
       return llm.discoverModels(NS, request)
+    }
+
+    let syncing = false
+    async function syncRoute(key, raw, revision) {
+      if (raw === null || typeof raw !== 'object' || raw.syncModels !== true) return
+      if (typeof raw.baseURL !== 'string' || !raw.baseURL) return
+      if (raw.api !== 'openai-completions' && raw.api !== 'openai-responses') return
+      let listed
+      try {
+        listed = await discoverModels({ baseURL: raw.baseURL, api: raw.api, apiKeyEnv: raw.apiKeyEnv })
+      } catch (e) {
+        return
+      }
+      if (!Array.isArray(listed) || listed.length === 0) return
+      const configuredModels = Array.isArray(raw.models) ? raw.models : []
+      const configuredIds = new Set(configuredModels.map((m) => m && m.id))
+      const discoveredIds = new Set(listed.map((m) => m.id))
+      if (configuredIds.size === discoveredIds.size && [...configuredIds].every((id) => discoveredIds.has(id))) return
+      const existing = new Map(configuredModels.map((m) => [m && m.id, m]))
+      const newModels = listed.map((m) => {
+        const old = existing.get(m.id)
+        const e = { id: m.id }
+        if (old !== undefined && typeof old.name === 'string' && old.name) e.name = old.name
+        else if (typeof m.name === 'string' && m.name) e.name = m.name
+        if (old !== undefined && typeof old.contextWindow === 'number') e.contextWindow = old.contextWindow
+        else if (typeof m.contextWindow === 'number') e.contextWindow = m.contextWindow
+        if (old !== undefined && typeof old.maxTokens === 'number') e.maxTokens = old.maxTokens
+        else if (typeof m.maxTokens === 'number') e.maxTokens = m.maxTokens
+        return e
+      })
+      const op = plainValue({ op: 'set', path: ['providers', key, 'models'], value: newModels })
+      try {
+        await settings.mutate(NS, [op], revision)
+      } catch (e) {
+        // conflict or transient failure: try again on the next tick
+      }
+    }
+
+    async function syncAll() {
+      if (syncing || settings === undefined || llm === undefined) return
+      syncing = true
+      try {
+        const snap = snapshot()
+        if (snap === undefined) return
+        for (const [key, raw] of Object.entries(snap.providers)) {
+          if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue
+          if (raw.syncModels !== true) continue
+          await syncRoute(key, raw, snap.descriptor.revision)
+        }
+      } catch (e) {
+        // never let a sync failure take the plugin down
+      } finally {
+        syncing = false
+      }
     }
 
     async function handleDiscover(args) {
@@ -218,5 +288,10 @@ return {
     ctx.effect(() => harness.handle('providers.remove', handleRemove))
     ctx.effect(() => harness.handle('credentials.set', handleCredentialSet))
     ctx.effect(() => harness.handle('credentials.unset', handleCredentialUnset))
+
+    // Background auto-sync: every 60s compare sync-marked routes' models with
+    // their endpoints and write back on change (fiber disposer = cleanup).
+    ctx.effect(() => ctx.interval(60000, () => { void syncAll() }))
+    void syncAll()
   },
 }
