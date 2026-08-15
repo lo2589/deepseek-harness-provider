@@ -6,6 +6,12 @@
 
 module.exports = {
   name: 'provider-quick-config',
+  // ctx.interval is mixed onto ctx by the timer service, and a mixin accessor
+  // throws `cannot get property "timer" without inject` rather than resolving
+  // to undefined. ctx.get('settings'|'credentials'|'llm') is the other kind —
+  // it returns undefined when unprovided — which is why only timer is declared
+  // here and the rest stay optional.
+  inject: ['timer'],
   apply(ctx) {
     const NS = 'llm-pi-ai'
     // Resolved per call, not captured at apply: a service that mounts after
