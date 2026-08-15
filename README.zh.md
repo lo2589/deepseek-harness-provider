@@ -4,6 +4,10 @@
 
 > **插件源码都在本目录**：`plugin/` 是动态插件形态（`host.js` = Host 半、`client.js` = Client 半、`manifest.json` = 可恢复定义）；**`dsh-provider-quick-config/` 是正式可安装的 npm 包**（Host 走 `dsh.bundle`，Web UI 走 `dsh.client`）——**不修改 deepseek-harness 任何源码**（仓库已跟踪文件 0 改动，本地与云端 `origin/master` 逐字节一致）。
 
+## 截图
+
+![Provider 面板截图](./assets/screenshot-1.png)
+
 ## 两种使用方式
 
 | | 动态插件（开发/临时） | **正式安装（推荐，长期）** |

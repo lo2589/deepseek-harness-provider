@@ -4,6 +4,10 @@
 
 > **Plugin source lives in this repo**: `plugin/` holds the dynamic-plugin form (`host.js` = Host half, `client.js` = Client half, `manifest.json` = restorable definition); **`dsh-provider-quick-config/` is the formally installable npm package** (Host via `dsh.bundle`, Web UI via `dsh.client`) — **zero changes to deepseek-harness source** (the repo's tracked files show no modifications; it is byte-identical to the cloud `origin/master`).
 
+## Screenshot
+
+![Provider panel screenshot](./assets/screenshot-1.png)
+
 ## Two ways to use this plugin
 
 | | Dynamic plugin (quick/dev) | **Formal install (recommended, permanent)** |
