@@ -1,0 +1,4 @@
+# Provider Quick Config — 正式安装 bundle patch（Host 入口）
+- insert:
+    - id: provider-quick-config
+      name: dsh-provider-quick-config

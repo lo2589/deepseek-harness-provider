@@ -2,7 +2,40 @@
 
 [中文版](./README.zh.md) | English
 
-> **Plugin source lives in this repo** under `plugin/` (`host.js` = Host half, `client.js` = Client half, `manifest.json` = complete, restorable definition). It is installed into the harness process as a **dynamic Cordis plugin** via `cordis_define` — **zero changes to deepseek-harness source** (the repo's tracked files show no modifications; it is byte-identical to the cloud `origin/master`).
+> **Plugin source lives in this repo**: `plugin/` holds the dynamic-plugin form (`host.js` = Host half, `client.js` = Client half, `manifest.json` = restorable definition); **`dsh-provider-quick-config/` is the formally installable npm package** (Host via `dsh.bundle`, Web UI via `dsh.client`) — **zero changes to deepseek-harness source** (the repo's tracked files show no modifications; it is byte-identical to the cloud `origin/master`).
+
+## Two ways to use this plugin
+
+| | Dynamic plugin (quick/dev) | **Formal install (recommended, permanent)** |
+|---|---|---|
+| Install | `cordis_define` in a session + approve the Run card | npm package installed into the `web` profile |
+| Lifetime | current harness process only — **lost on restart** | **survives restarts**, permanent |
+| Communication | `harness.handle` / `host.call` (sandbox RPC) | standard wire (`connection.api`: settings / credentials / llm) |
+| Source | `plugin/` | `dsh-provider-quick-config/` |
+
+### Formal install (already done on this machine)
+
+The package was built, packed (`dsh-provider-quick-config-0.1.1.tgz`) and installed into the `web` profile:
+
+```bash
+cd /Users/a1/Workspace/WORKSPACE/deepseek-harness
+# pack the package (in dsh-provider-quick-config/): npm pack
+node --import tsx/esm apps/cli/src/bin.ts plugin --profile web add \
+  file:/…/dsh-provider-quick-config/dsh-provider-quick-config-0.1.1.tgz
+cd ~/.dsh/profiles/web && pnpm install   # only needed when the tarball path changed
+```
+
+`dsh plugin add` runs `pnpm add` in the profile and appends the package to `dsh.profile.bundles` when it declares `dsh.bundle.patch`. Verify:
+
+```bash
+cat ~/.dsh/profiles/web/package.json
+# dsh.profile.bundles should include "dsh-provider-quick-config"
+```
+
+**Then restart `dsh web`** (e.g. `deepseek.sh restart`) — the Host half mounts from the profile bundle, and `dsh-client-modules` serves the Web half at `/plugins/dsh-provider-quick-config/client.js`. After restart: the **+** button appears next to Send (no per-session approval needed anymore).
+
+Update after code changes: bump the version, re-pack, `dsh plugin --profile web add file:…<new>.tgz` (or update the dependency spec + `pnpm install`), restart.
+Uninstall: `dsh plugin --profile web remove dsh-provider-quick-config`, restart.
 
 A **+** button next to the **Send** button in the DeepSeek Harness Web GUI. Click it to configure model providers without touching config files by hand:
 

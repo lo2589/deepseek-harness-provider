@@ -2,7 +2,40 @@
 
 [English](./README.md) | 中文
 
-> **插件本体源码在本目录 `plugin/`**（`host.js` = Host 半、`client.js` = Client 半、`manifest.json` = 完整可恢复定义）。它通过 `cordis_define` 以**动态 Cordis 插件**方式装进 harness 进程 —— **不修改 deepseek-harness 任何源码**（仓库已跟踪文件 0 改动，本地与云端 `origin/master` 逐字节一致）。
+> **插件源码都在本目录**：`plugin/` 是动态插件形态（`host.js` = Host 半、`client.js` = Client 半、`manifest.json` = 可恢复定义）；**`dsh-provider-quick-config/` 是正式可安装的 npm 包**（Host 走 `dsh.bundle`，Web UI 走 `dsh.client`）——**不修改 deepseek-harness 任何源码**（仓库已跟踪文件 0 改动，本地与云端 `origin/master` 逐字节一致）。
+
+## 两种使用方式
+
+| | 动态插件（开发/临时） | **正式安装（推荐，长期）** |
+|---|---|---|
+| 安装 | 会话里 `cordis_define` + 批准 Run 卡 | npm 包装进 `web` profile |
+| 生命周期 | 只在当前 harness 进程，**重启即失** | **重启不丢，永久生效** |
+| 通信 | `harness.handle` / `host.call`（沙箱 RPC） | 标准 wire（`connection.api`：settings / credentials / llm） |
+| 源码 | `plugin/` | `dsh-provider-quick-config/` |
+
+### 正式安装（本机已装好）
+
+已打包成 `dsh-provider-quick-config-0.1.1.tgz` 并装进 `web` profile：
+
+```bash
+cd /Users/a1/Workspace/WORKSPACE/deepseek-harness
+# 打包（在 dsh-provider-quick-config/ 里执行）：npm pack
+node --import tsx/esm apps/cli/src/bin.ts plugin --profile web add \
+  file:/…/dsh-provider-quick-config/dsh-provider-quick-config-0.1.1.tgz
+cd ~/.dsh/profiles/web && pnpm install   # 仅当 tarball 路径变化时需要
+```
+
+`dsh plugin add` 会在 profile 里跑 `pnpm add`，包声明了 `dsh.bundle.patch` 就会自动加进 `dsh.profile.bundles`。验证：
+
+```bash
+cat ~/.dsh/profiles/web/package.json
+# dsh.profile.bundles 应包含 "dsh-provider-quick-config"
+```
+
+**然后重启 `dsh web`**（如 `deepseek.sh restart`）——Host 半随 profile bundle 挂载，`dsh-client-modules` 在 `/plugins/dsh-provider-quick-config/client.js` 提供 Web 半。重启后发送键旁出现 **+**（不再需要每次会话批准）。
+
+改代码后更新：升版本 → 重新 `npm pack` → `dsh plugin --profile web add file:…<新版本>.tgz`（或改依赖指向 + `pnpm install`）→ 重启。
+卸载：`dsh plugin --profile web remove dsh-provider-quick-config`，重启。
 
 在 DeepSeek Harness Web GUI 的**发送键旁边**加一个 **+** 号按钮。点开后弹出面板，可以：
 
