@@ -1,10 +1,13 @@
 # Provider Quick Config（dsh 动态插件）
 
+> 插件本体源码在本目录 `plugin/`（`host.js` = Host 半、`client.js` = Client 半、`manifest.json` = 完整可恢复定义）。它通过 `cordis_define` 以**动态 Cordis 插件**方式装进 harness 进程 —— **不修改 deepseek-harness 任何源码**（仓库 `git status` 已跟踪文件 0 改动）。
+
 在 DeepSeek Harness Web GUI 的**发送键旁边**加一个 **+** 号按钮。点开后弹出面板，可以：
 
 - 列出当前已配置的模型 Provider（`llm-pi-ai.providers.*` 路由），显示凭据是否已配置、每个 Provider 挂着哪些模型；
 - **预设厂商一键添加**：智谱 GLM、MiniMax、OpenAI GPT、Anthropic Claude、本地模型 (Ollama) —— 端点 / 协议 / thinkingFormat / 模型列表都预填好；
 - **模型选择器**：编辑表单里每个厂商有"快捷模型"chips（点一下选中/取消），也能手动加任意模型 id 并填 ctx/max —— 比如 MiniMax 想用 M3，点 M3 chip 即可，不需要碰 JSON；
+- **保存前自动校验模型名（ping）**：点保存时插件先请求端点的 `GET /models` 对照模型列表（大小写/连字符忽略）——不存在的模型名直接红字报错并**阻止保存**（如把 `GLM-4.6` 打成 `glm4.6v` 会被当场指出）；端点不支持列表查询或没开则跳过校验正常保存；
 - **本地模型自动加载**：选 Ollama 预设后自动请求 `GET /models` 把本机模型列表填进表单（也可在任何自定义路由上点"自动获取模型"）；
 - **同一厂商加多个 key**：再点同一个厂商，key 自动排号（glm → glm2 → glm3…），显示名自动带"号N"；
 - 或添加**自定义 OpenAI 兼容** Provider（自建网关 / 本地服务，手写 `api`、`baseURL`、`thinkingFormat`、模型列表）；
@@ -31,6 +34,16 @@
 3. 点 **+** → 添加 Provider → 选模板或自定义 → 填表单 → 保存。
 
 > 也可同时打开 **设置 → 模型** 使用官方的完整模型页；本插件是输入框旁的快捷入口。
+
+## 进程重启后如何恢复插件
+
+动态插件只活在进程内存里，**重启 dsh web 后 pprov-1 会消失**。恢复方法（源码都在本目录，不会丢）：
+
+1. `code.host` ← `plugin/host.js` 全文；
+2. `code.client` ← `plugin/client.js` 全文；
+3. 用 `cordis_define`（`kind: "new"`，`idPrefix: "pprov"`，`name` / `purpose` 照抄 `plugin/manifest.json`）重新定义，再 `cordis_run`。
+
+配置本身（`~/.dsh/settings.yaml` + `.credentials.yaml`）不受影响，恢复后路由立刻还在。
 
 ## 表单字段说明
 
