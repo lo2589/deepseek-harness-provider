@@ -1,80 +1,95 @@
-# Provider Quick Config（dsh 动态插件）
+# Provider Quick Config — a dsh dynamic plugin
 
-> 插件本体源码在本目录 `plugin/`（`host.js` = Host 半、`client.js` = Client 半、`manifest.json` = 完整可恢复定义）。它通过 `cordis_define` 以**动态 Cordis 插件**方式装进 harness 进程 —— **不修改 deepseek-harness 任何源码**（仓库 `git status` 已跟踪文件 0 改动）。
+[中文版](./README.zh.md) | English
 
-在 DeepSeek Harness Web GUI 的**发送键旁边**加一个 **+** 号按钮。点开后弹出面板，可以：
+> **Plugin source lives in this repo** under `plugin/` (`host.js` = Host half, `client.js` = Client half, `manifest.json` = complete, restorable definition). It is installed into the harness process as a **dynamic Cordis plugin** via `cordis_define` — **zero changes to deepseek-harness source** (the repo's tracked files show no modifications; it is byte-identical to the cloud `origin/master`).
 
-- 列出当前已配置的模型 Provider（`llm-pi-ai.providers.*` 路由），显示凭据是否已配置、每个 Provider 挂着哪些模型；
-- **预设厂商一键添加**：智谱 GLM、MiniMax、OpenAI GPT、Anthropic Claude、本地模型 (Ollama) —— 端点 / 协议 / thinkingFormat / 模型列表都预填好；
-- **模型选择器**：编辑表单里每个厂商有"快捷模型"chips（点一下选中/取消），也能手动加任意模型 id 并填 ctx/max —— 比如 MiniMax 想用 M3，点 M3 chip 即可，不需要碰 JSON；
-- **保存前自动校验模型名（ping）**：点保存时插件先请求端点的 `GET /models` 对照模型列表（大小写/连字符忽略）——不存在的模型名直接红字报错并**阻止保存**（如把 `GLM-4.6` 打成 `glm4.6v` 会被当场指出）；端点不支持列表查询或没开则跳过校验正常保存；
-- **本地模型自动加载**：选 Ollama 预设后自动请求 `GET /models` 把本机模型列表填进表单（也可在任何自定义路由上点"自动获取模型"）；
-- **同一厂商加多个 key**：再点同一个厂商，key 自动排号（glm → glm2 → glm3…），显示名自动带"号N"；
-- 或添加**自定义 OpenAI 兼容** Provider（自建网关 / 本地服务，手写 `api`、`baseURL`、`thinkingFormat`、模型列表）；
-- 编辑 / 删除已有路由；填写或更新 API 密钥。
+A **+** button next to the **Send** button in the DeepSeek Harness Web GUI. Click it to configure model providers without touching config files by hand:
 
-## 原理（零代码改动，纯配置文件热生效）
+- List every configured provider route (`llm-pi-ai.providers.*`) with credential status and the models each one serves.
+- **One-click vendor presets**: 智谱 GLM, MiniMax, OpenAI GPT, Anthropic Claude, Local models (Ollama) — endpoint / protocol / thinkingFormat / model list are pre-filled.
+- **Model picker**: per-vendor quick-model chips (click to select/deselect) plus free-form rows (id / ctx / max) — e.g. switch MiniMax to **M3** by clicking the `MiniMax-M3` chip, no JSON editing.
+- **Auto-validate model names on save (ping)**: before saving, the plugin queries the endpoint's `GET /models` and compares (case/dash-insensitive). A model that does not exist (e.g. typing `glm4.6v` instead of `GLM-4.6`) fails with a red error and **blocks the save**. Endpoints that do not support listing are skipped and saved normally.
+- **Auto-load local models**: picking the Ollama preset immediately fetches `GET /models` and fills the form (a "Fetch models" button exists on every custom route too).
+- **Multiple API keys per vendor**: add the same vendor again and the route key auto-numbers (`glm` → `glm2` → `glm3`…), display name gets `· 号N`.
+- Custom **OpenAI-compatible** providers (any gateway / self-hosted server) with hand-written `api`, `baseURL`, `thinkingFormat`, and model list.
+- Edit / delete existing routes; set or update API keys.
 
-它没有自己另建一套配置，而是直接调用 harness 已有的两个 seam：
+## How it works (no harness code changes — pure config files, hot-reload)
 
-| 动作 | 写入位置 | 生效方式 |
+The plugin does not invent its own config store; it drives the two seams the harness already ships:
+
+| Action | Written to | Effect |
 |---|---|---|
-| 添加 / 编辑 / 删除路由 | `$DSH_HOME/settings.yaml` 的 `llm-pi-ai.providers` | settings 服务 `mutate` → 文件落盘 → `llm-pi-ai` 适配器 watcher 重注册，**下一次请求即生效** |
-| 保存 / 更新 API 密钥 | `$DSH_HOME/.credentials.yaml`（0600） | credentials 服务 `set` → 文件被监听，热生效 |
+| Add / edit / delete routes | `llm-pi-ai.providers` in `$DSH_HOME/settings.yaml` | settings `mutate` → file persisted → the `llm-pi-ai` adapter's watcher re-registers — **live on the next request** |
+| Save / update API keys | `$DSH_HOME/.credentials.yaml` (0600) | credentials `set` → file is watched, hot-reloads |
 
-插件只存 **凭据引用（环境变量名）**，密钥值只进 `.credentials.yaml`，不回传 GUI。
+Only **credential references (environment-variable names)** are stored by the plugin; key values go straight into `.credentials.yaml` and never come back to the GUI.
 
-写路由时走 `settings.mutate`，它会经过 `llm-pi-ai` 命名空间的 schema + `assertServiceable` 校验：
-配错的协议、空 baseURL、非法模型会被**在写入时就拒绝**并报错，不会把坏路由存进去。
+Route writes go through `settings.mutate`, which validates against the `llm-pi-ai` namespace schema + `assertServiceable`: a wrong protocol, empty baseURL, or invalid model is **rejected at write time** — a broken route can never be stored.
 
-## 安装 / 运行
+## Install / run
 
-1. 在本会话的 Run 卡片上允许授权（单勾即可，双勾允许后续版本自动运行）；
-2. 刷新页面后，聊天输入框右侧（发送键旁）会出现 **+**；
-3. 点 **+** → 添加 Provider → 选模板或自定义 → 填表单 → 保存。
+1. Approve the Run card in this session (single check is enough; double check auto-runs future versions).
+2. Refresh the page — the **+** appears in the composer's tool row, next to the model selector / send button.
+3. Click **+** → Add Provider → pick a preset or custom → fill the form → Save.
 
-> 也可同时打开 **设置 → 模型** 使用官方的完整模型页；本插件是输入框旁的快捷入口。
+> The official **Settings → Models** page still works alongside; this plugin is the quick entry point beside the input box.
 
-## 进程重启后如何恢复插件
+## Restoring the plugin after a process restart
 
-动态插件只活在进程内存里，**重启 dsh web 后 pprov-1 会消失**。恢复方法（源码都在本目录，不会丢）：
+Dynamic plugins live only in process memory: **restarting `dsh web` removes `pprov-1`**. Restore from this repo (the source never goes away):
 
-1. `code.host` ← `plugin/host.js` 全文；
-2. `code.client` ← `plugin/client.js` 全文；
-3. 用 `cordis_define`（`kind: "new"`，`idPrefix: "pprov"`，`name` / `purpose` 照抄 `plugin/manifest.json`）重新定义，再 `cordis_run`。
+1. `code.host` ← full content of `plugin/host.js`
+2. `code.client` ← full content of `plugin/client.js`
+3. Re-define with `cordis_define` (`kind: "new"`, `idPrefix: "pprov"`; copy `name` / `purpose` from `plugin/manifest.json`), then `cordis_run`.
 
-配置本身（`~/.dsh/settings.yaml` + `.credentials.yaml`）不受影响，恢复后路由立刻还在。
+Your configuration (`~/.dsh/settings.yaml` + `.credentials.yaml`) is untouched, so routes reappear immediately.
 
-## 表单字段说明
+## Form fields
 
-| 字段 | 说明 |
+| Field | Notes |
 |---|---|
-| 路由 key | 唯一标识（`providers` 字典的 key），可随意起名，**保存后不可改**。同一厂商可建多条（如 glm1 / glm2） |
-| 显示名 | 模型选择器里显示的名字，默认用 key |
-| 凭据引用 | 环境变量名，如 `GLM_API_KEY`；请求时经 credentials 解析 |
-| API 密钥 | 选填。填了 → 写入 `.credentials.yaml`；留空 → 不改动 / 靠环境变量 |
-| API 协议 | 自定义路线三选一：`openai-completions` / `openai-responses` / `anthropic-messages` |
-| BaseURL | 自定义路线必填 |
-| thinkingFormat | `openai-completions` 的推理字段方言：`openai / deepseek / openrouter / together / zai / qwen / string-thinking / ant-ling`。自建端点猜不到就手写（如 MiniMax → `deepseek`，智谱 → `zai`） |
-| 模型列表 | 自定义路线至少一项：`[{ "id": "…", "contextWindow": 131072, "maxTokens": 32768 }]` |
+| Route key | Unique id (the `providers` dict key); arbitrary, **immutable after save**. Multiple keys per vendor (glm1 / glm2 …) |
+| Display name | Shown in the model picker; defaults to the key |
+| Credential ref | Environment-variable name, e.g. `GLM_API_KEY`; resolved per request through credentials |
+| API key | Optional. Filled → written to `.credentials.yaml`; empty → keep existing / rely on env |
+| API protocol | Custom routes pick one: `openai-completions` / `openai-responses` / `anthropic-messages` |
+| BaseURL | Required for custom routes |
+| thinkingFormat | Reasoning-field dialect for `openai-completions`: `openai / deepseek / openrouter / together / zai / qwen / string-thinking / ant-ling`. Hand-write when the endpoint URL is unrecognized (MiniMax → `deepseek`, Zhipu → `zai`) |
+| Models | Custom routes need ≥1: `[{ "id": "…", "contextWindow": 131072, "maxTokens": 32768 }]` |
 
-## 踩坑备忘（来自实际使用记录）
+## Pitfalls (learned the hard way)
 
-- **Ollama 也要填密钥**：OpenAI 兼容实现照样发 `Authorization` 头，占位非空即可（如 `local`）。
-- **目录路线不用写模型**：只要 key + 密钥，模型/端点/协议继承 pi-ai 目录；自定义路线才手写模型。
-- **`.credentials.yaml` 格式极严**：平铺 `名字: 值`，根必须是映射、值必须非空字符串、不能重复 key，任何一条都会启动失败。
-- **⚠️ settings.yaml 不要用 YAML 锚点（`&anchor` / `*anchor`）**：settings 服务保存时按节点保留式合并，一旦保存替换了锚点定义者（如 `glm` 的 `models: &glm_models`），其余引用 `*glm_models` 的节点会变成悬空别名，整个文档序列化报 `Unresolved alias (the anchor must be set before the alias)`——插件和官方"设置→模型"页都会失败。多账号共用模型请写成显式列表（或让插件帮你展平）。已用锚点的文件可先让我/脚本展平再在 GUI 里保存。
-- **环境变量是启动时快照**：进程启动后再 `export` 不生效，得重启；用本插件的密钥字段（写 `.credentials.yaml`）则不需要。
-- **`apiKeyEnv` 配了但解析不到** → 直接 `MISSING_CREDENTIAL`，不会回退到环境里别的 key。
-- 已发过请求的会话会保留日志里记录的模型；默认模型指向已删除的 Provider 时，选择器会要求重新选模型。
+- **Ollama still wants a key**: the OpenAI-compatible implementation always sends an `Authorization` header, so give it any non-empty placeholder (e.g. `local`).
+- **Catalog routes don't need a model list**: key + credential only; endpoint/protocol/models are inherited from the pi-ai catalog. Hand-written routes declare models explicitly.
+- **`.credentials.yaml` is strict**: a flat `name: value` map; the root must be a mapping, values must be non-empty strings, and duplicate keys fail the whole file at startup.
+- **⚠️ Do NOT use YAML anchors (`&anchor` / `*anchor`) in settings.yaml**: the settings service saves with node-preserving merges; once a save replaces the anchor's owner (e.g. `glm`'s `models: &glm_models`), remaining `*glm_models` aliases dangle and the whole document fails to serialize with `Unresolved alias (the anchor must be set before the alias)` — both this plugin and the official Settings → Models page hit it. Write shared model lists explicitly (or ask the plugin/me to flatten the file first).
+- **Environment variables are a startup snapshot**: `export` after launch does nothing until restart; use this plugin's key field (writes `.credentials.yaml`) instead.
+- **`apiKeyEnv` set but unresolvable** → `MISSING_CREDENTIAL`; it will not fall back to some other key that happens to be in the environment.
+- Sessions that already sent requests keep the model recorded in their log; if the default model points to a deleted provider, the picker asks you to choose again.
 
-## 技术说明（给改插件的人）
+## Technical notes (for plugin maintainers)
 
-- **Host 半**（`harness.handle` RPC，全部走 `ctx.settings` / `ctx.credentials` / `ctx.llm`）：
-  - `providers.list` → 已配置路由 + 凭据状态 + pi-ai 目录 + 协议/推理方言枚举
-  - `providers.save` / `providers.remove` → **ops 由 Client 构造、经 wire 传入**，Host 只转发给 `settings.mutate('llm-pi-ai', ops, revision)`
+- **Host half** (`harness.handle` RPC, all through `ctx.settings` / `ctx.credentials` / `ctx.llm`):
+  - `providers.list` → configured routes + credential state + pi-ai directory + protocol/dialect enums
+  - `providers.save` / `providers.remove` → **ops are built Client-side and arrive over the wire**; the Host only forwards them to `settings.mutate('llm-pi-ai', ops, revision)`
   - `providers.discover` → `ctx.llm.discoverModels('llm-pi-ai', { baseURL, api, apiKey })`
+  - `providers.ping` → same discovery, then validates each model id (normalized) against the listing
   - `credentials.set` / `credentials.unset`
-- **⚠️ vm 沙箱 realm 陷阱**：动态 Host 代码跑在 `node:vm` 独立 realm 里，任何对象字面量都不是宿主 realm 的 plain object —— 传给校验 `isPlainObject` 的服务（如 `settings.mutate` / `settings.update`）会直接抛 `ops must be {op:'set'|'unset', path}`。**凡是传给这类服务的结构化数据，必须由 Client 侧构造、经 `host.call` 的 JSON wire 传入**（wire 解码后就是宿主 realm 对象）；Host 侧只做转发。返回结果则无所谓（guard 会自动把结果物化为宿主对象）。
-- **Client 半**：`+` 按钮注册在 `conversation.input.right`（发送键左侧工具行），面板注册在 `conversation.input.overlay`（输入卡悬浮锚点），主题色全部走 `--dsw-*` 变量。
-- 写操作带 `expectedRevision`，撞并发会 `SETTINGS_CONFLICT`，客户端自动重读重试一次。
+- **⚠️ vm-sandbox realm trap**: dynamic Host code runs in a `node:vm` realm, so any object literal is not a host-realm plain object — passing one to a service that checks `isPlainObject` (like `settings.mutate` / `settings.update`) throws `ops must be {op:'set'|'unset', path}`. **Any structured data for such services must be constructed Client-side and passed through the `host.call` JSON wire** (wire-decoded values are host-realm); the Host only forwards. Return values are fine — the guard re-materializes them.
+- **Client half**: the `+` button registers in `conversation.input.right` (tool row before the send button); the panel registers in `conversation.input.overlay` (the composer's floating anchor); all colors use `--dsw-*` theme variables.
+- Writes carry `expectedRevision`; a concurrent edit raises `SETTINGS_CONFLICT` and the client re-reads and retries once.
+
+## Repository layout
+
+```
+DeepSeek-Harness-provider/
+├── README.md          # this file (English)
+├── README.zh.md       # 中文版
+├── plugin/
+│   ├── host.js        # Host half source (code.host body)
+│   ├── client.js      # Client half source (code.client body)
+│   └── manifest.json  # restorable definition (name/purpose/code)
+└── .gitignore
+```
