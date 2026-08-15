@@ -6,3 +6,6 @@ node_modules/
 *.log
 # npm pack 产物
 *.tgz
+
+# 博客草稿（本地保留，不入库）
+BLOG.md
