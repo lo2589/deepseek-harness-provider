@@ -50,6 +50,7 @@
 - **Ollama 也要填密钥**：OpenAI 兼容实现照样发 `Authorization` 头，占位非空即可（如 `local`）。
 - **目录路线不用写模型**：只要 key + 密钥，模型/端点/协议继承 pi-ai 目录；自定义路线才手写模型。
 - **`.credentials.yaml` 格式极严**：平铺 `名字: 值`，根必须是映射、值必须非空字符串、不能重复 key，任何一条都会启动失败。
+- **⚠️ settings.yaml 不要用 YAML 锚点（`&anchor` / `*anchor`）**：settings 服务保存时按节点保留式合并，一旦保存替换了锚点定义者（如 `glm` 的 `models: &glm_models`），其余引用 `*glm_models` 的节点会变成悬空别名，整个文档序列化报 `Unresolved alias (the anchor must be set before the alias)`——插件和官方"设置→模型"页都会失败。多账号共用模型请写成显式列表（或让插件帮你展平）。已用锚点的文件可先让我/脚本展平再在 GUI 里保存。
 - **环境变量是启动时快照**：进程启动后再 `export` 不生效，得重启；用本插件的密钥字段（写 `.credentials.yaml`）则不需要。
 - **`apiKeyEnv` 配了但解析不到** → 直接 `MISSING_CREDENTIAL`，不会回退到环境里别的 key。
 - 已发过请求的会话会保留日志里记录的模型；默认模型指向已删除的 Provider 时，选择器会要求重新选模型。
