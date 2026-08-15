@@ -546,8 +546,8 @@ window.__ModuleLoader__.load({
           abortRef.current = ctrl
           sessions.search(q.trim(), ctrl.signal).then(function (res) {
             if (ctrl.signal.aborted) return
-            if (res.ok) { setResults(res.value.items); setOpen(true) }
-            else { setResults([]); setOpen(true) }
+            if (res.ok) { setResults({ items: res.value.items, hasMore: !!res.value.hasMore }); setOpen(true) }
+            else { setResults({ items: [], hasMore: false }); setOpen(true) }
           }).catch(function () {
             if (!ctrl.signal.aborted) { setResults([]); setOpen(true) }
           })
@@ -559,9 +559,12 @@ window.__ModuleLoader__.load({
           h('input', { className: 'pp-input hs-input', placeholder: '搜索历史…', value: query,
             onChange: function (e) { var v = e.target.value; setQuery(v); doSearch(v) } }),
           open && results !== null ? h('div', { className: 'hs-drop' },
-            results.length === 0
+            results.items.length === 0
               ? h('div', { className: 'hs-empty' }, '无结果')
-              : results.map(function (r) {
+              : results.hasMore ? h('div', { className: 'hs-empty' }, '结果较多，仅显示前 20 条，用更精确的关键词') : null,
+            results.items.length === 0
+              ? null
+              : results.items.map(function (r) {
                 return h('button', { type: 'button', key: r.sessionId, className: 'hs-item',
                   onClick: function () { if (sessions !== undefined) sessions.open(r.sessionId); setOpen(false) } },
                   h('span', { className: 'hs-snippet' }, r.snippet))

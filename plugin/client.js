@@ -451,29 +451,27 @@ return {
       const [results, setResults] = React.useState(null)
       const [open, setOpen] = React.useState(false)
       const abortRef = React.useRef(null)
+      const genRef = React.useRef(0)
       const doSearch = (q) => {
-        if (abortRef.current !== null) abortRef.current.abort()
-        if (sessions === undefined || q.trim() === '') {
+        const gen = ++genRef.current
+        if (q.trim() === '') {
           setResults(null)
           setOpen(false)
           return
         }
-        const ctrl = new AbortController()
-        abortRef.current = ctrl
-        sessions.search(q.trim(), ctrl.signal).then((res) => {
-          if (ctrl.signal.aborted) return
-          if (res.ok) {
-            setResults(res.value.items)
+        host.call('search.sessions', { query: q.trim() }).then((res) => {
+          if (gen !== genRef.current) return
+          if (res !== null && typeof res === 'object' && Array.isArray(res.items)) {
+            setResults(res.items)
             setOpen(true)
           } else {
             setResults([])
             setOpen(true)
           }
         }).catch(() => {
-          if (!ctrl.signal.aborted) {
-            setResults([])
-            setOpen(true)
-          }
+          if (gen !== genRef.current) return
+          setResults([])
+          setOpen(true)
         })
       }
       React.useEffect(() => () => { if (abortRef.current !== null) abortRef.current.abort() }, [])
@@ -483,6 +481,9 @@ return {
         open && results !== null ? h('div', { className: 'hs-drop' },
           results.length === 0
             ? h('div', { className: 'hs-empty' }, '无结果')
+            : results.length >= 100 ? h('div', { className: 'hs-empty' }, '结果很多，只显示前 100 条，用更精确的关键词') : null,
+          results.length === 0
+            ? null
             : results.map((r) => h('button', { type: 'button', key: r.sessionId, className: 'hs-item',
               onClick: () => { if (sessions !== undefined) sessions.open(r.sessionId); setOpen(false) } },
               h('span', { className: 'hs-snippet' }, r.snippet))))

@@ -288,6 +288,38 @@ return {
       return { ok: true }
     }
 
+    async function handleSearchSessions(args) {
+      const sessionQuery = ctx.get('sessionQuery')
+      if (sessionQuery === undefined) throw new Error('sessionQuery 服务不可用（未装 session-query 插件）')
+      const a = args !== null && typeof args === 'object' ? args : {}
+      const query = typeof a.query === 'string' && a.query.trim() ? a.query.trim() : ''
+      if (query === '') return { items: [], hasMore: false }
+      const eventFilters = [
+        { kind: 'type', values: ['user/message', 'assistant/message'] },
+        { kind: 'surface', values: ['current'] },
+      ]
+      const items = []
+      const seen = new Set()
+      let cursor
+      for (;;) {
+        const request = { query, eventFilters, limit: 100 }
+        if (cursor !== undefined) request.cursor = cursor
+        const page = await sessionQuery.searchSessions(request)
+        for (const hit of (page.items || [])) {
+          if (hit === null || typeof hit !== 'object') continue
+          const id = hit.header !== null && typeof hit.header === 'object' ? hit.header.id : undefined
+          const snip = hit.bestMatch !== null && typeof hit.bestMatch === 'object' ? hit.bestMatch.snippet : undefined
+          if (typeof id === 'string' && typeof snip === 'string' && !seen.has(id)) {
+            seen.add(id)
+            items.push({ sessionId: id, snippet: snip.slice(0, 240) })
+          }
+        }
+        if (!page.hasMore || page.nextCursor === undefined || items.length >= 100) break
+        cursor = page.nextCursor
+      }
+      return { items, hasMore: items.length >= 100 }
+    }
+
     async function handleCredentialSet(args) {
       const ref = args !== null && typeof args === 'object' && typeof args.ref === 'string' ? args.ref : ''
       const value = args !== null && typeof args === 'object' && typeof args.value === 'string' ? args.value : ''
@@ -308,6 +340,7 @@ return {
       return { ok: true }
     }
 
+    ctx.effect(() => harness.handle('search.sessions', handleSearchSessions))
     ctx.effect(() => harness.handle('providers.list', handleList))
     ctx.effect(() => harness.handle('providers.discover', handleDiscover))
     ctx.effect(() => harness.handle('providers.ping', handlePing))
