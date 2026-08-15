@@ -239,8 +239,13 @@ window.__ModuleLoader__.load({
         try {
           var data = await loadData(api)
           setState({ data, error: null })
+          return true
         } catch (e) {
+          // Whether store.data actually moved is the caller's business: a
+          // conflict retry reusing the revision this call failed to refresh
+          // just conflicts again and reports the wrong cause.
           setState({ error: messageOf(e) })
+          return false
         }
       }
 
@@ -365,17 +370,22 @@ window.__ModuleLoader__.load({
         setDraft({ models: next })
       }
 
-      async function saveWithRetry(args) {
-        try {
-          await saveProviderWire(api, Object.assign({}, args, { revision: store.data ? store.data.revision : undefined }))
-        } catch (e) {
-          if (String((e && e.message) || e).indexOf('SETTINGS_CONFLICT') >= 0) {
-            await refresh()
-            await saveProviderWire(api, Object.assign({}, args, { revision: store.data ? store.data.revision : undefined }))
-            return
-          }
-          throw e
+      // The background model sync writes to the same namespace, so a conflict
+      // here is ordinary rather than exceptional: re-read and send again once.
+      async function callWithRetry(wire, args) {
+        function withRevision() {
+          return Object.assign({}, args, { revision: store.data ? store.data.revision : undefined })
         }
+        try {
+          await wire(api, withRevision())
+        } catch (e) {
+          if (String((e && e.message) || e).indexOf('SETTINGS_CONFLICT') < 0) throw e
+          if (!(await refresh())) throw e
+          await wire(api, withRevision())
+        }
+      }
+      async function saveWithRetry(args) {
+        await callWithRetry(saveProviderWire, args)
       }
 
       async function save() {
@@ -451,7 +461,7 @@ window.__ModuleLoader__.load({
         if (store.confirmKey !== key) { setState({ confirmKey: key }); return }
         setState({ busy: true, error: null, confirmKey: null })
         try {
-          await removeProviderWire(api, { ops: [{ op: 'unset', path: ['providers', key] }], revision: store.data ? store.data.revision : undefined })
+          await callWithRetry(removeProviderWire, { ops: [{ op: 'unset', path: ['providers', key] }] })
           await refresh()
           setState({ busy: false, notice: '已删除 ' + key })
         } catch (e) {

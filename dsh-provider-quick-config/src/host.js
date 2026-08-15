@@ -8,11 +8,15 @@ module.exports = {
   name: 'provider-quick-config',
   apply(ctx) {
     const NS = 'llm-pi-ai'
-    const settings = ctx.get('settings')
-    const credentials = ctx.get('credentials')
-    const llm = ctx.get('llm')
+    // Resolved per call, not captured at apply: a service that mounts after
+    // this plugin would otherwise stay undefined for the process's whole life,
+    // and the sync would degrade silently and never recover.
+    const settingsOf = () => ctx.get('settings')
+    const credentialsOf = () => ctx.get('credentials')
+    const llmOf = () => ctx.get('llm')
 
     function snapshot() {
+      const settings = settingsOf()
       if (settings === undefined) return undefined
       let descriptor
       try {
@@ -30,6 +34,8 @@ module.exports = {
     }
 
     async function discoverModels(baseURL, api, apiKeyEnv) {
+      const llm = llmOf()
+      const credentials = credentialsOf()
       if (llm === undefined) throw new Error('llm 服务不可用')
       const request = { baseURL, ...(api === undefined ? {} : { api }) }
       if (apiKeyEnv !== undefined && credentials !== undefined) {
@@ -61,16 +67,20 @@ module.exports = {
       if (configuredIds.size === discoveredIds.size && [...configuredIds].every((id) => discoveredIds.has(id))) return
       const existing = new Map(configuredModels.map((m) => [m && m.id, m]))
       const newModels = listed.map((m) => {
+        // Start from what the user wrote, so a field this sync does not know
+        // about — reasoningEfforts, above all — survives it. Rebuilding from a
+        // fixed list of keys would delete those silently.
         const old = existing.get(m.id)
-        const e = { id: m.id }
-        if (old !== undefined && typeof old.name === 'string' && old.name) e.name = old.name
-        else if (typeof m.name === 'string' && m.name) e.name = m.name
-        if (old !== undefined && typeof old.contextWindow === 'number') e.contextWindow = old.contextWindow
-        else if (typeof m.contextWindow === 'number') e.contextWindow = m.contextWindow
-        if (old !== undefined && typeof old.maxTokens === 'number') e.maxTokens = old.maxTokens
-        else if (typeof m.maxTokens === 'number') e.maxTokens = m.maxTokens
+        const e = old !== undefined && old !== null && typeof old === 'object'
+          ? Object.assign({}, old, { id: m.id })
+          : { id: m.id }
+        if (e.name === undefined && typeof m.name === 'string' && m.name) e.name = m.name
+        if (typeof e.contextWindow !== 'number' && typeof m.contextWindow === 'number') e.contextWindow = m.contextWindow
+        if (typeof e.maxTokens !== 'number' && typeof m.maxTokens === 'number') e.maxTokens = m.maxTokens
         return e
       })
+      const settings = settingsOf()
+      if (settings === undefined) return
       try {
         await settings.mutate(NS, [{ op: 'set', path: ['providers', key, 'models'], value: newModels }], revision)
       } catch (e) {
@@ -79,12 +89,19 @@ module.exports = {
     }
 
     async function syncAll() {
-      if (syncing || settings === undefined || llm === undefined) return
+      if (syncing || settingsOf() === undefined || llmOf() === undefined) return
       syncing = true
       try {
-        const snap = snapshot()
-        if (snap === undefined) return
-        for (const [key, raw] of Object.entries(snap.providers)) {
+        const first = snapshot()
+        if (first === undefined) return
+        for (const key of Object.keys(first.providers)) {
+          // Re-read before each route: revision is a monotonic counter over the
+          // whole namespace, so the write that just landed moved it. Reusing the
+          // opening snapshot's number makes every route after the first fail
+          // SETTINGS_CONFLICT — silently, because syncRoute swallows it.
+          const snap = snapshot()
+          if (snap === undefined) return
+          const raw = snap.providers[key]
           if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue
           if (raw.syncModels !== true) continue
           await syncRoute(key, raw, snap.descriptor.revision)

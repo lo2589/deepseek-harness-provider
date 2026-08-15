@@ -127,11 +127,19 @@ return {
         : new Promise(() => {})
       try {
         await Promise.race([call, deadline])
-        if (!timedOut) setState({ data: await call, error: null })
+        if (!timedOut) {
+          setState({ data: await call, error: null })
+          return true
+        }
       } catch (e) {
         if (!timedOut) setState({ error: messageOf(e) })
+        return false
       }
-      if (timedOut) setState({ error: '加载超时（12 秒）。多半是页面还连着旧插件，请刷新页面（Cmd/Ctrl+Shift+R）后重试。' })
+      // Whether `store.data` actually moved is the caller's business: a
+      // conflict retry that reuses the revision this call failed to refresh
+      // just conflicts again and reports the wrong cause.
+      setState({ error: '加载超时（12 秒）。多半是页面还连着旧插件，请刷新页面（Cmd/Ctrl+Shift+R）后重试。' })
+      return false
     }
 
     const openPanel = () => {
@@ -265,17 +273,21 @@ return {
       setDraft({ models: next })
     }
 
-    const saveWithRetry = async (args) => {
+    // The background model sync writes to the same namespace, so a conflict
+    // here is ordinary rather than exceptional: re-read and send again once.
+    const callWithRetry = async (method, args) => {
+      const withRevision = () => jsonArgs(Object.assign({}, args, {
+        revision: store.data ? store.data.revision : undefined,
+      }))
       try {
-        return await host.call('providers.save', jsonArgs(Object.assign({}, args, { revision: store.data ? store.data.revision : undefined })))
+        return await host.call(method, withRevision())
       } catch (e) {
-        if (String((e && e.message) || e).includes('SETTINGS_CONFLICT')) {
-          await refresh()
-          return host.call('providers.save', jsonArgs(Object.assign({}, args, { revision: store.data ? store.data.revision : undefined })))
-        }
-        throw e
+        if (!String((e && e.message) || e).includes('SETTINGS_CONFLICT')) throw e
+        if (!(await refresh())) throw e
+        return host.call(method, withRevision())
       }
     }
+    const saveWithRetry = (args) => callWithRetry('providers.save', args)
 
     const save = async () => {
       const s = store
@@ -372,7 +384,7 @@ return {
       }
       setState({ busy: true, error: null, confirmKey: null })
       try {
-        await host.call('providers.remove', jsonArgs({ ops: [{ op: 'unset', path: ['providers', key] }], revision: store.data ? store.data.revision : undefined }))
+        await callWithRetry('providers.remove', { ops: [{ op: 'unset', path: ['providers', key] }] })
         await refresh()
         setState({ busy: false, notice: '已删除 ' + key })
       } catch (e) {

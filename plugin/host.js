@@ -9,9 +9,13 @@ return {
   apply(ctx) {
     const NS = 'llm-pi-ai'
     const REF = /^[A-Za-z_][A-Za-z0-9_]*$/
-    const settings = ctx.get('settings')
-    const credentials = ctx.get('credentials')
-    const llm = ctx.get('llm')
+    // Resolved per call, not captured at apply: a service that mounts after
+    // this plugin would otherwise stay undefined for the process's whole life,
+    // and every handler here would degrade silently and never recover. Reading
+    // through the accessor keeps the graceful degradation without freezing it.
+    const settingsOf = () => ctx.get('settings')
+    const credentialsOf = () => ctx.get('credentials')
+    const llmOf = () => ctx.get('llm')
     const PROTOCOLS = ['openai-completions', 'openai-responses', 'anthropic-messages']
     const THINKING = ['openai', 'deepseek', 'openrouter', 'together', 'zai', 'qwen', 'string-thinking', 'ant-ling']
 
@@ -38,6 +42,7 @@ return {
     }
 
     function snapshot() {
+      const settings = settingsOf()
       if (settings === undefined) return undefined
       let descriptor
       try {
@@ -55,6 +60,7 @@ return {
     }
 
     function directory() {
+      const llm = llmOf()
       if (llm === undefined) return []
       try {
         return llm.listConfigurableProviders()
@@ -64,6 +70,7 @@ return {
     }
 
     async function credentialOf(ref) {
+      const credentials = credentialsOf()
       if (credentials === undefined || typeof ref !== 'string' || !REF.test(ref)) {
         return { configured: false, writable: false }
       }
@@ -112,6 +119,7 @@ return {
           }))
         }
       }
+      const settings = settingsOf()
       return {
         available: snap !== undefined,
         writable: settings !== undefined ? !!settings.writable : false,
@@ -124,6 +132,8 @@ return {
     }
 
     async function discoverModels(args) {
+      const llm = llmOf()
+      const credentials = credentialsOf()
       if (llm === undefined) throw new Error('llm 服务不可用')
       const a = args !== null && typeof args === 'object' ? args : {}
       const request = {}
@@ -160,17 +170,22 @@ return {
       if (configuredIds.size === discoveredIds.size && [...configuredIds].every((id) => discoveredIds.has(id))) return
       const existing = new Map(configuredModels.map((m) => [m && m.id, m]))
       const newModels = listed.map((m) => {
+        // Start from what the user wrote, so a field this sync does not know
+        // about — reasoningEfforts, above all — survives it. Rebuilding the
+        // entry from a fixed list of keys would delete those silently, and a
+        // silent deletion of configuration is worse than a stale model list.
         const old = existing.get(m.id)
-        const e = { id: m.id }
-        if (old !== undefined && typeof old.name === 'string' && old.name) e.name = old.name
-        else if (typeof m.name === 'string' && m.name) e.name = m.name
-        if (old !== undefined && typeof old.contextWindow === 'number') e.contextWindow = old.contextWindow
-        else if (typeof m.contextWindow === 'number') e.contextWindow = m.contextWindow
-        if (old !== undefined && typeof old.maxTokens === 'number') e.maxTokens = old.maxTokens
-        else if (typeof m.maxTokens === 'number') e.maxTokens = m.maxTokens
+        const e = old !== undefined && old !== null && typeof old === 'object'
+          ? Object.assign({}, old, { id: m.id })
+          : { id: m.id }
+        if (e.name === undefined && typeof m.name === 'string' && m.name) e.name = m.name
+        if (typeof e.contextWindow !== 'number' && typeof m.contextWindow === 'number') e.contextWindow = m.contextWindow
+        if (typeof e.maxTokens !== 'number' && typeof m.maxTokens === 'number') e.maxTokens = m.maxTokens
         return e
       })
       const op = plainValue({ op: 'set', path: ['providers', key, 'models'], value: newModels })
+      const settings = settingsOf()
+      if (settings === undefined) return
       try {
         await settings.mutate(NS, [op], revision)
       } catch (e) {
@@ -179,12 +194,19 @@ return {
     }
 
     async function syncAll() {
-      if (syncing || settings === undefined || llm === undefined) return
+      if (syncing || settingsOf() === undefined || llmOf() === undefined) return
       syncing = true
       try {
-        const snap = snapshot()
-        if (snap === undefined) return
-        for (const [key, raw] of Object.entries(snap.providers)) {
+        const first = snapshot()
+        if (first === undefined) return
+        for (const key of Object.keys(first.providers)) {
+          // Re-read before each route: revision is a monotonic counter over the
+          // whole namespace, so the write that just landed moved it. Reusing
+          // the opening snapshot's number makes every route after the first
+          // fail SETTINGS_CONFLICT — silently, because syncRoute swallows it.
+          const snap = snapshot()
+          if (snap === undefined) return
+          const raw = snap.providers[key]
           if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue
           if (raw.syncModels !== true) continue
           await syncRoute(key, raw, snap.descriptor.revision)
@@ -228,6 +250,8 @@ return {
 
     async function handleSave(args) {
       const a = args !== null && typeof args === 'object' ? args : {}
+      const settings = settingsOf()
+      const credentials = credentialsOf()
       if (settings === undefined) throw new Error('settings 服务不可用')
       const ops = Array.isArray(a.ops) ? a.ops : []
       if (ops.length !== 1 || ops[0] === null || typeof ops[0] !== 'object'
@@ -252,6 +276,7 @@ return {
 
     async function handleRemove(args) {
       const a = args !== null && typeof args === 'object' ? args : {}
+      const settings = settingsOf()
       if (settings === undefined) throw new Error('settings 服务不可用')
       const ops = Array.isArray(a.ops) ? a.ops : []
       if (ops.length !== 1 || ops[0] === null || typeof ops[0] !== 'object'
@@ -268,6 +293,7 @@ return {
       const value = args !== null && typeof args === 'object' && typeof args.value === 'string' ? args.value : ''
       if (!REF.test(ref)) throw new Error('凭据引用名不合法（须为环境变量名）')
       if (value === '') throw new Error('密钥不能为空')
+      const credentials = credentialsOf()
       if (credentials === undefined) throw new Error('credentials 服务不可用')
       await credentials.set(ref, value)
       return { ok: true }
@@ -276,6 +302,7 @@ return {
     async function handleCredentialUnset(args) {
       const ref = args !== null && typeof args === 'object' && typeof args.ref === 'string' ? args.ref : ''
       if (!REF.test(ref)) throw new Error('凭据引用名不合法（须为环境变量名）')
+      const credentials = credentialsOf()
       if (credentials === undefined) throw new Error('credentials 服务不可用')
       await credentials.unset(ref)
       return { ok: true }
@@ -291,7 +318,9 @@ return {
 
     // Background auto-sync: every 60s compare sync-marked routes' models with
     // their endpoints and write back on change (fiber disposer = cleanup).
-    ctx.effect(() => ctx.interval(60000, () => { void syncAll() }))
+    // Callback first: `interval(delay)` is the other overload and returns an
+    // async iterator, so the argument order decides whether this runs at all.
+    ctx.effect(() => ctx.interval(() => { void syncAll() }, 60000))
     void syncAll()
   },
 }
