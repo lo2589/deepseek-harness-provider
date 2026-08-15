@@ -59,6 +59,12 @@ return {
         thinkingFormat: 'openai',
         models: [],
       },
+      {
+        provider: 'mlx', displayName: '本地模型 (MLX)', declared: true, local: true, syncModels: true,
+        api: 'openai-completions', baseURL: 'http://127.0.0.1:8080/v1',
+        thinkingFormat: 'openai',
+        models: [],
+      },
     ]
     const KNOWN = {
       glm: ['GLM-4.5-Air', 'GLM-4.5', 'GLM-4.6', 'GLM-4.7', 'GLM-4.7-Flash', 'GLM-4.6V'],
@@ -448,7 +454,7 @@ return {
     const renderPicker = (s) => {
       const items = PRESETS.map((p) => h('button', { type: 'button', className: 'pp-tpl', key: p.provider, onClick: () => startAdd(p) },
         h('span', { className: 'pp-tpl-name' }, p.displayName),
-        h('span', { className: 'pp-tpl-key' }, p.local ? 'localhost:11434 · 自动加载模型' : (p.baseURL || p.provider))))
+        h('span', { className: 'pp-tpl-key' }, p.local ? (p.baseURL + ' · 自动同步模型') : (p.baseURL || p.provider))))
       items.push(h('button', { type: 'button', className: 'pp-tpl pp-tpl-custom', key: '__custom__', onClick: () => startAdd(TPL_CUSTOM) },
         h('span', { className: 'pp-tpl-name' }, '自定义 OpenAI 兼容'),
         h('span', { className: 'pp-tpl-key' }, '任意网关 / 自建端点 / 本地服务')))

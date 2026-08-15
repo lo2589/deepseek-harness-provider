@@ -1,6 +1,6 @@
 {
   "name": "dsh-provider-quick-config",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "发送键旁 + 号快速配置模型 Provider（llm-pi-ai 路由/模型/密钥），本地模型 60s 自动同步。正式安装形态：dsh.bundle 挂 Host，dsh.client 挂 Web UI。",
   "main": "src/host.js",
