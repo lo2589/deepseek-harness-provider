@@ -155,9 +155,10 @@ module.exports = {
         ok = false
       }
       if (!ok) return
-      // mark the model image-capable in config (raw section keeps the field)
+      if (Array.isArray(model.input) && model.input.indexOf('image') >= 0) return
+      // 自动配置：把 schema 认可的 input: [text, image] 写进模型条目，适配器即按可读图处理
       try {
-        await settings.mutate(NS, [{ op: 'set', path: ['providers', key, 'models', model.index, 'image'], value: true }], revision)
+        await settings.mutate(NS, [{ op: 'set', path: ['providers', key, 'models', model.index, 'input'], value: ['text', 'image'] }], revision)
       } catch (e) { /* next cycle retries */ }
     }
     async function probeAll() {
@@ -171,7 +172,7 @@ module.exports = {
           const m = models[i]
           if (m === null || typeof m !== 'object' || typeof m.id !== 'string') continue
           if (m.image === true) continue
-          await probeModel(key, raw, { id: m.id, index: i }, snap.descriptor.revision)
+          await probeModel(key, raw, { id: m.id, index: i, input: m.input }, snap.descriptor.revision)
         }
       }
     }
