@@ -508,6 +508,27 @@ return {
           : null)
     }
 
+    const UploadButton = (props) => {
+      const inputRef = React.useRef(null)
+      const onChange = (e) => {
+        const files = Array.from(e.target.files || [])
+        e.target.value = ''
+        if (files.length === 0) return
+        const conversation = ctx.get('conversation')
+        if (conversation === undefined || props.inputActions === undefined) return
+        const images = conversation.createDraftImages(files)
+        if (images.length > 0 && !props.inputActions.addImages(images.map((i) => i.id))) {
+          conversation.releaseDraftImages(images)
+        }
+      }
+      return h('div', { className: 'pp-uploadwrap' },
+        h('input', { ref: inputRef, type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' }, onChange }),
+        h('button', { type: 'button', className: 'pp-plus pp-upload', title: '从本地选择图片', 'aria-label': '上传图片',
+          onClick: () => { if (inputRef.current !== null) inputRef.current.click() } },
+          h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, 'aria-hidden': true },
+            h('path', { d: 'M8 2.5v11M2.5 8h11', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' }))))
+    }
+
     const ScreenshotButton = (props) => {
       const [busy, setBusy] = React.useState(false)
       const shoot = async () => {
@@ -758,6 +779,10 @@ return {
     slots.inject('conversation.session.header.utilities', () => slots.register(
       { name: 'conversation.session.header.utilities', id: 'history-search', order: 1 },
       () => React.createElement(HistorySearch),
+    ))
+    slots.inject('conversation.input.right', () => slots.register(
+      { name: 'conversation.input.right', id: 'upload-btn', order: -2 },
+      (props) => React.createElement(UploadButton, props),
     ))
     slots.inject('conversation.input.right', () => slots.register(
       { name: 'conversation.input.right', id: 'screenshot-btn', order: -1 },
