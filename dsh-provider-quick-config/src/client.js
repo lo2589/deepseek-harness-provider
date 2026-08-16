@@ -972,7 +972,6 @@ window.__ModuleLoader__.load({
           media = h('span', { className: 'sc-empty' }, item.name)
         }
         var insertable = item.kind === 'image' || item.kind === 'video' || item.kind === 'audio'
-        var insertLabel = item.kind === 'image' ? '插入对话' : '插入路径'
         return h('div', { className: 'sc-item' + (props.selected ? ' sc-item-sel' : ''),
             onClick: () => { if (props.onSelect !== undefined) props.onSelect(item) } },
           h('div', { className: 'sc-media' }, media),
@@ -981,9 +980,14 @@ window.__ModuleLoader__.load({
             h('span', { className: 'sc-mname', title: item.path }, item.name),
             h('span', { className: 'sc-msize' }, fmtSize(item.size))),
           h('div', { className: 'sc-item-actions' },
+            // 所有类型都能插入路径文本到输入框
             h('button', { type: 'button', className: 'sc-insert', disabled: !insertable,
+                onClick: (e) => { e.stopPropagation(); if (props.onInsertPath !== undefined) props.onInsertPath(item) } },
+              '插入路径'),
+            // 图片额外支持插入附件
+            item.kind === 'image' ? h('button', { type: 'button', className: 'sc-insert',
                 onClick: (e) => { e.stopPropagation(); if (props.onInsert !== undefined) props.onInsert(item) } },
-              insertLabel)))
+              '插入对话') : null))
       }
       function ShowcasePanel() {
         var s = useStore()
@@ -1011,30 +1015,13 @@ window.__ModuleLoader__.load({
             g.items.map(function (item) {
               return h(MediaItem, { key: item.path, item: item, sessionId: s.showcaseSession,
                 selected: selected !== null && selected.path === item.path,
-                onSelect: (it) => setSelected(it), onInsert: (it) => doInsert(it) })
+                onSelect: (it) => setSelected(it),
+                onInsert: (it) => doInsert(it),
+                onInsertPath: (it) => doInsertPath(it) })
             }))
         }
-        function doInsert(item) {
-          if (item.kind === 'image') {
-            // 图片通过 fetch 拿 blob → createDraftImages → 加入草稿
-            fetch(mediaUrl(s.showcaseSession, item.path)).then(function (res) {
-              if (!res.ok) throw new Error('HTTP ' + res.status)
-              return res.blob()
-            }).then(function (blob) {
-              var conv = ctx.get('conversation')
-              if (conv === undefined || typeof conv.createDraftImages !== 'function') {
-                setState({ showcaseError: '当前环境不支持插入图片' })
-                return
-              }
-              var file = new File([blob], item.name, { type: blob.type || 'application/octet-stream' })
-              var ids = conv.createDraftImages([file])
-              setState({ showcaseError: null })
-            }).catch(function (e) {
-              setState({ showcaseError: messageOf(e) })
-            })
-            return
-          }
-          // 视频/录音：插入路径文本到输入框（对话提到它 → 展示台闭环）
+        function doInsertPath(item) {
+          // 所有类型：插入路径文本到输入框（对话提到它 → 展示台闭环）
           var ia = store.showcaseInputActions
           if (ia === null || typeof ia.setDraft !== 'function') {
             setState({ showcaseError: '当前环境不支持插入文本' })
@@ -1042,6 +1029,25 @@ window.__ModuleLoader__.load({
           }
           ia.setDraft(item.path)
           setState({ showcaseError: null })
+        }
+        function doInsert(item) {
+          // 仅图片：通过 fetch 拿 blob → createDraftImages → 加入草稿
+          if (item.kind !== 'image') return
+          fetch(mediaUrl(s.showcaseSession, item.path)).then(function (res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status)
+            return res.blob()
+          }).then(function (blob) {
+            var conv = ctx.get('conversation')
+            if (conv === undefined || typeof conv.createDraftImages !== 'function') {
+              setState({ showcaseError: '当前环境不支持插入图片' })
+              return
+            }
+            var file = new File([blob], item.name, { type: blob.type || 'application/octet-stream' })
+            var ids = conv.createDraftImages([file])
+            setState({ showcaseError: null })
+          }).catch(function (e) {
+            setState({ showcaseError: messageOf(e) })
+          })
         }
         return h('div', null,
           // 常驻侧栏：不设全屏遮罩（overlay 层本身点击穿透），不挡对话框交互
