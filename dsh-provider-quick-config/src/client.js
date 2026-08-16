@@ -695,6 +695,8 @@ window.__ModuleLoader__.load({
         var busyState = React.useState(false)
         var busy = busyState[0]
         var setBusy = busyState[1]
+        // 挂载时强制 busy=false：防止上次卡死的超时 Promise 把按钮永久锁死
+        React.useEffect(function () { setBusy(false) }, [])
         function toast(msg) {
           // 全局轻提示：不依赖展示台面板是否打开
           setState({ showcaseError: msg })
@@ -756,18 +758,20 @@ window.__ModuleLoader__.load({
           } catch (err) { /* guide best-effort */ }
         }
         async function shoot() {
-          if (busy || typeof navigator === 'undefined' || navigator.mediaDevices === undefined
+          if (typeof navigator === 'undefined' || navigator.mediaDevices === undefined
             || navigator.mediaDevices.getDisplayMedia === undefined) {
             toast('截图：此浏览器不支持屏幕捕获（需 HTTPS 或 localhost）')
             return
           }
+          // 点击立即反馈：busy 防抖但 30s 必释放
+          toast('正在请求屏幕捕获…')
           setBusy(true)
           var stream
           try {
             // 超时保护：部分浏览器在非用户激活上下文会静默挂起
             stream = await Promise.race([
               navigator.mediaDevices.getDisplayMedia({ video: true }),
-              new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout: getDisplayMedia')) }, 120000) }),
+              new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout: getDisplayMedia')) }, 30000) }),
             ])
           } catch (e) {
             setBusy(false)
