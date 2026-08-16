@@ -621,7 +621,7 @@ window.__ModuleLoader__.load({
         })
       }
 
-      async function readAgent(sessionId, imageIds, draftText) {
+      async function readAgent(sessionId, imageIds, draftText, inputActions) {
         var conv = ctx.get('conversation')
         if (conv === undefined || store.data === null) return
         var routes = store.data.providers.filter(function (p) { return Array.isArray(p.imageModels) && p.imageModels.length > 0 })
@@ -650,6 +650,9 @@ window.__ModuleLoader__.load({
           var pr = await api.sessions.prompt({ sessionId: sid, mode: 'queue', content: parts })
           if (!pr.result.ok) throw new Error(pr.result.error.message)
           if (ctx.get('sessions') !== undefined) ctx.get('sessions').open(sid)
+          if (inputActions !== undefined) {
+            for (var j = 0; j < imageIds.length; j++) inputActions.removeImage(imageIds[j])
+          }
           setState({ busy: false, notice: '已发送到读图 Agent（' + (route.displayName || route.key) + ' / ' + model + '），结果在打开的会话里' })
         } catch (e) {
           setState({ busy: false, error: '读图失败: ' + messageOf(e) })
@@ -657,11 +660,13 @@ window.__ModuleLoader__.load({
       }
 
       function ReadAgentButton(props) {
+        var loaded = React.useRef(false)
+        React.useEffect(function () { if (!loaded.current) { loaded.current = true; refresh() } }, [])
         var imageIds = props.useInput !== undefined ? props.useInput(function (st) { return st ? st.imageIds : [] }) : []
         var draftText = props.useInput !== undefined ? props.useInput(function (st) { return st ? st.draft : '' }) : ''
         if (imageIds.length === 0) return null
         return h('button', { type: 'button', className: 'pp-plus pp-read', title: '用读图 Agent 处理图片',
-          'aria-label': '读图', onClick: function () { void readAgent(props.sessionId, imageIds, draftText) } },
+          'aria-label': '读图', onClick: function () { void readAgent(props.sessionId, imageIds, draftText, props.inputActions) } },
           h('svg', { viewBox: '0 0 24 24', width: 15, height: 15, 'aria-hidden': true },
             h('path', { d: 'M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1Z', fill: 'currentColor' })))
       }
@@ -717,6 +722,8 @@ window.__ModuleLoader__.load({
       function PlusButton(props) {
         var sessions = ctx.get('sessions')
         var readRef = React.useRef(null)
+        var loaded = React.useRef(false)
+        React.useEffect(function () { if (!loaded.current) { loaded.current = true; refresh() } }, [])
         var imageIds = props.useInput !== undefined ? props.useInput(function (st) { return st ? st.imageIds : [] }) : []
         var draftText = props.useInput !== undefined ? props.useInput(function (st) { return st ? st.draft : '' }) : ''
         React.useEffect(function () {
@@ -729,7 +736,7 @@ window.__ModuleLoader__.load({
               && (p.image === true || (Array.isArray(p.imageModels) && p.imageModels.some(function (m) { return m.id === cur.model }))) })
             if (capable || readRef.current === props.sessionId) return
             readRef.current = props.sessionId
-            void readAgent(props.sessionId, imageIds, draftText)
+            void readAgent(props.sessionId, imageIds, draftText, props.inputActions)
           })
         }, [imageIds.length, props.sessionId, store.data])
         useStore()

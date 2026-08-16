@@ -582,6 +582,8 @@ return {
       const imageIds = props.useInput !== undefined ? props.useInput((st) => (st ? st.imageIds : [])) : []
       const sessions = ctx.get('sessions')
       const switchedRef = React.useRef(null)
+      const loadedRef = React.useRef(false)
+      React.useEffect(() => { if (!loadedRef.current) { loadedRef.current = true; refresh() } }, [])
       React.useEffect(() => {
         if (imageIds.length === 0 || sessions === undefined || s.data === null) return
         const isCapable = (route, provider, model) => route.key === provider
