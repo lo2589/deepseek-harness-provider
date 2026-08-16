@@ -640,6 +640,11 @@ window.__ModuleLoader__.load({
           } catch (e) { /* skip unreadable */ }
         }
         if (parts.length === 0) return
+        var clearDraft = function () {
+          if (inputActions !== undefined) {
+            for (var j = 0; j < imageIds.length; j++) inputActions.removeImage(imageIds[j])
+          }
+        }
         setState({ busy: true, error: null, notice: null })
         try {
           var createRes = await api.sessions.create({})
@@ -649,13 +654,12 @@ window.__ModuleLoader__.load({
           if (!sm.result.ok) throw new Error(sm.result.error.message)
           var pr = await api.sessions.prompt({ sessionId: sid, mode: 'queue', content: parts })
           if (!pr.result.ok) throw new Error(pr.result.error.message)
+          clearDraft()
           if (ctx.get('sessions') !== undefined) ctx.get('sessions').open(sid)
-          if (inputActions !== undefined) {
-            for (var j = 0; j < imageIds.length; j++) inputActions.removeImage(imageIds[j])
-          }
           setState({ busy: false, notice: '已发送到读图 Agent（' + (route.displayName || route.key) + ' / ' + model + '），结果在打开的会话里' })
         } catch (e) {
-          setState({ busy: false, error: '读图失败: ' + messageOf(e) })
+          clearDraft()
+          setState({ busy: false, error: '读图失败: ' + messageOf(e) + '（已清空图片，输入框可继续使用）' })
         }
       }
 

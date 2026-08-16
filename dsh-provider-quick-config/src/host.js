@@ -149,7 +149,7 @@ module.exports = {
         })
         if (res.ok) {
           const text = await res.text()
-          ok = text.indexOf('"choices"') >= 0
+          ok = text.indexOf('"choices"') >= 0 && text.indexOf('"finish_reason":"length"') < 0
         }
       } catch (e) {
         ok = false
