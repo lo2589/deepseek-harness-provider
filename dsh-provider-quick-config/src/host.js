@@ -123,9 +123,12 @@ module.exports = {
     const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
     async function probeModel(key, raw, model, revision) {
       if (raw === null || typeof raw !== 'object' || typeof raw.baseURL !== 'string' || !raw.baseURL) return
+      const settings = settingsOf()
+      const credentials = credentialsOf()
+      if (settings === undefined || credentials === undefined) return
       const api = raw.api === 'openai-responses' ? 'openai-responses' : 'openai-completions'
       let apiKey
-      if (typeof raw.apiKeyEnv === 'string' && raw.apiKeyEnv && credentials !== undefined) {
+      if (typeof raw.apiKeyEnv === 'string' && raw.apiKeyEnv) {
         try {
           const resolved = await credentials.resolve(raw.apiKeyEnv)
           if (resolved !== undefined) apiKey = resolved.value
@@ -164,7 +167,6 @@ module.exports = {
       } catch (e) { /* next cycle retries */ }
     }
     async function probeAll() {
-      if (settings === undefined || credentials === undefined) return
       const snap = snapshot()
       if (snap === undefined) return
       for (const [key, raw] of Object.entries(snap.providers)) {

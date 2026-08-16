@@ -19,13 +19,13 @@
 
 ### 正式安装（本机已装好）
 
-已打包成 `dsh-provider-quick-config-0.1.1.tgz` 并装进 `web` profile：
+已打包成 `dsh-provider-quick-config-0.2.7.tgz` 并装进 `web` profile：
 
 ```bash
 cd /path/to/deepseek-harness
 # 打包（在 dsh-provider-quick-config/ 里执行）：npm pack
 node --import tsx/esm apps/cli/src/bin.ts plugin --profile web add \
-  file:/path/to/dsh-provider-quick-config/dsh-provider-quick-config-0.1.1.tgz
+  file:/path/to/dsh-provider-quick-config/dsh-provider-quick-config-0.2.7.tgz
 cd ~/.dsh/profiles/web && pnpm install   # 仅当 tarball 路径变化时需要
 ```
 
