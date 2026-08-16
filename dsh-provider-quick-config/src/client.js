@@ -697,6 +697,8 @@ window.__ModuleLoader__.load({
         var setBusy = busyState[1]
         // 挂载时强制 busy=false：防止上次卡死的超时 Promise 把按钮永久锁死
         React.useEffect(function () { setBusy(false) }, [])
+        // 截图失败重试计数（useRef：防"再试→失败→再弹引导"无限循环，不触发重渲染）
+        var retryRef = React.useRef(0)
         function toast(msg) {
           // 全局轻提示：不依赖展示台面板是否打开
           setState({ showcaseError: msg })
@@ -744,6 +746,12 @@ window.__ModuleLoader__.load({
             var retry = document.getElementById('pp-guide-retry')
             if (retry !== null) retry.addEventListener('click', function () {
               if (wrap.parentNode !== null) wrap.parentNode.removeChild(wrap)
+              retryRef.current = retryRef.current + 1
+              if (retryRef.current >= 3) {
+                // 已反复失败：不再递归，改用系统截图
+                showShotFallback('已多次尝试屏幕捕获未成功，用系统截图最可靠。')
+                return
+              }
               void shoot()
             })
             var settings = document.getElementById('pp-guide-settings')
@@ -784,6 +792,11 @@ window.__ModuleLoader__.load({
             var retry = document.getElementById('pp-guide-retry')
             if (retry !== null) retry.addEventListener('click', function () {
               if (wrap.parentNode !== null) wrap.parentNode.removeChild(wrap)
+              retryRef.current = retryRef.current + 1
+              if (retryRef.current >= 3) {
+                toast('建议直接用系统截图：' + shotKey + ' 后粘贴')
+                return
+              }
               void shoot()
             })
           } catch (e) { /* fallback best-effort */ }
@@ -830,20 +843,8 @@ window.__ModuleLoader__.load({
           }
           try {
             var blob = cropped.blob
-            // 1) 立即插入附件到输入框（原行为，纯浏览器端，不依赖 host）
-            var file = new File([blob], 'screenshot-' + Date.now() + '.png', { type: 'image/png' })
-            var conversation = ctx.get('conversation')
-            if (conversation !== undefined && typeof conversation.createDraftImages === 'function') {
-              var images = conversation.createDraftImages([file])
-              if (images.length > 0 && props.inputActions !== undefined
-                && typeof props.inputActions.addImages === 'function') {
-                if (!props.inputActions.addImages(images.map(function (i) { return i.id }))) {
-                  if (typeof conversation.releaseDraftImages === 'function') conversation.releaseDraftImages(images)
-                }
-              }
-            }
-            toast('截图已插入输入框')
-            // 2) 尽力而为：保存到工作区 .screenshots/（host 有 save-screenshot 路由才成功；失败不阻塞）
+            // 1) 保存到工作区 .screenshots/（默认进多媒体库/展示台；host 有 save-screenshot 路由才成功）
+            var savedPath = null
             try {
               var reader = new FileReader()
               var dataBase64 = await new Promise(function (res, rej) {
@@ -862,11 +863,30 @@ window.__ModuleLoader__.load({
               var saved = null
               try { saved = await res2.json() } catch (e) { saved = null }
               if (res2.ok && saved !== null && saved.path !== undefined) {
+                savedPath = saved.path
                 setState({ showcaseError: null })
-                if (s.showcaseOpen) void loadShowcase(s.showcaseSession)
+                // 打开展示台让它立刻可见
+                setShowcase(true, s.showcaseSession)
+                void loadShowcase(s.showcaseSession)
               }
-              // 保存失败静默：截图已插入，功能不受影响
             } catch (e2) { /* save best-effort */ }
+            if (savedPath !== null) {
+              toast('截图已存入多媒体库：' + savedPath)
+            } else {
+              // host 路由不可用（没重启）时，退而插入输入框，保证截图不丢
+              var file = new File([blob], 'screenshot-' + Date.now() + '.png', { type: 'image/png' })
+              var conversation = ctx.get('conversation')
+              if (conversation !== undefined && typeof conversation.createDraftImages === 'function') {
+                var images = conversation.createDraftImages([file])
+                if (images.length > 0 && props.inputActions !== undefined
+                  && typeof props.inputActions.addImages === 'function') {
+                  if (!props.inputActions.addImages(images.map(function (i) { return i.id }))) {
+                    if (typeof conversation.releaseDraftImages === 'function') conversation.releaseDraftImages(images)
+                  }
+                }
+              }
+              toast('截图已插入输入框（保存路由不可用，重启后自动进多媒体库）')
+            }
           } catch (e) {
             toast('截图失败：' + messageOf(e))
           } finally {
