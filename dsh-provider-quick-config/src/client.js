@@ -802,33 +802,43 @@ window.__ModuleLoader__.load({
               toast('截图失败：画布无法导出')
               return
             }
-            // 存到工作区 .截图/（默认进多媒体库，不自动插入正文）
-            var reader = new FileReader()
-            var dataBase64 = await new Promise(function (res, rej) {
-              reader.onload = function () { res(String(reader.result || '').split(',')[1] || '') }
-              reader.onerror = rej
-              reader.readAsDataURL(blob)
-            })
-            var ts = new Date()
-            function pad(n) { return n < 10 ? '0' + n : String(n) }
-            var stamp = ts.getFullYear() + pad(ts.getMonth() + 1) + pad(ts.getDate()) + '-' + pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds())
-            var res2 = await fetch(MEDIA_ROUTE + '/save-screenshot?session=' + encodeURIComponent(s.showcaseSession || ''), {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ name: 'screenshot-' + stamp + '.png', dataBase64: dataBase64 }),
-            })
-            var saved = null
-            try { saved = await res2.json() } catch (e) { saved = null }
-            if (!res2.ok || saved === null || saved.path === undefined) {
-              toast('截图保存失败：' + ((saved !== null && saved.error) || ('HTTP ' + res2.status)) + '（host 需重启加载保存路由）')
-              return
+            // 1) 立即插入附件到输入框（原行为，纯浏览器端，不依赖 host）
+            var file = new File([blob], 'screenshot-' + Date.now() + '.png', { type: 'image/png' })
+            var conversation = ctx.get('conversation')
+            if (conversation !== undefined && typeof conversation.createDraftImages === 'function') {
+              var images = conversation.createDraftImages([file])
+              if (images.length > 0 && props.inputActions !== undefined
+                && typeof props.inputActions.addImages === 'function') {
+                if (!props.inputActions.addImages(images.map(function (i) { return i.id }))) {
+                  if (typeof conversation.releaseDraftImages === 'function') conversation.releaseDraftImages(images)
+                }
+              }
             }
-            // 路径写进输入框（用户决定发不发）；刷新展示台让它出现
-            var ia = store.showcaseInputActions
-            if (ia !== null && typeof ia.setDraft === 'function') ia.setDraft(saved.path)
-            setState({ showcaseError: null })
-            toast('截图已存入 ' + saved.path)
-            if (s.showcaseOpen) void loadShowcase(s.showcaseSession)
+            toast('截图已插入输入框')
+            // 2) 尽力而为：保存到工作区 .截图/（host 有 save-screenshot 路由才成功；失败不阻塞）
+            try {
+              var reader = new FileReader()
+              var dataBase64 = await new Promise(function (res, rej) {
+                reader.onload = function () { res(String(reader.result || '').split(',')[1] || '') }
+                reader.onerror = rej
+                reader.readAsDataURL(blob)
+              })
+              var ts = new Date()
+              function pad(n) { return n < 10 ? '0' + n : String(n) }
+              var stamp = ts.getFullYear() + pad(ts.getMonth() + 1) + pad(ts.getDate()) + '-' + pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds())
+              var res2 = await fetch(MEDIA_ROUTE + '/save-screenshot?session=' + encodeURIComponent(s.showcaseSession || ''), {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ name: 'screenshot-' + stamp + '.png', dataBase64: dataBase64 }),
+              })
+              var saved = null
+              try { saved = await res2.json() } catch (e) { saved = null }
+              if (res2.ok && saved !== null && saved.path !== undefined) {
+                setState({ showcaseError: null })
+                if (s.showcaseOpen) void loadShowcase(s.showcaseSession)
+              }
+              // 保存失败静默：截图已插入，功能不受影响
+            } catch (e2) { /* save best-effort */ }
           } catch (e) {
             toast('截图失败：' + messageOf(e))
           } finally {
@@ -836,7 +846,7 @@ window.__ModuleLoader__.load({
             setBusy(false)
           }
         }
-        return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图 → 存入 .截图/ 并写入输入框路径',
+        return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框（顺带存入 .截图/）',
           'aria-label': '截图', onClick: shoot },
           h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, 'aria-hidden': true },
             h('path', { d: 'M3 4.5h2l1-1.5h4l1 1.5h2a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V6A1.5 1.5 0 0 1 3 4.5Zm5 6.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z', fill: 'currentColor' })))
