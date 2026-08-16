@@ -757,27 +757,59 @@ window.__ModuleLoader__.load({
             })
           } catch (err) { /* guide best-effort */ }
         }
+        // 屏幕捕获拉不起来时的可靠替代：系统截图 + 粘贴（harness 输入框原生支持粘贴图片）
+        function showShotFallback(reason) {
+          try {
+            var old = document.getElementById('pp-shot-guide')
+            if (old !== null && old.parentNode !== null) old.parentNode.removeChild(old)
+            var wrap = document.createElement('div')
+            wrap.id = 'pp-shot-guide'
+            wrap.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9998;width:min(400px,calc(100vw-48px));background:var(--dsw-specific-menu,#1f1f1f);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);padding:18px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary,#eee);font-family:inherit;'
+            var ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : ''
+            var isMac = ua.indexOf('Mac') >= 0
+            var shotKey = isMac ? 'Cmd+Shift+4' : 'Win+Shift+S'
+            wrap.innerHTML =
+              '<div style="font-weight:600;font-size:15px;margin-bottom:8px;">屏幕捕获没弹出来</div>'
+              + '<div style="color:var(--dsw-alias-label-secondary,#999);margin-bottom:10px;">' + String(reason || '') + '</div>'
+              + '<div style="color:var(--dsw-alias-label-primary,#eee);margin-bottom:12px;">用系统截图替代，一样能进对话：</div>'
+              + '<ol style="margin:0 0 14px 18px;padding:0;color:var(--dsw-alias-label-primary,#eee);">'
+              + '<li>按 <b>' + shotKey + '</b> 框选屏幕区域，截图自动进剪贴板</li>'
+              + '<li>回到本页，点击输入框，按 <b>Cmd/Ctrl+V</b> 粘贴</li>'
+              + '<li>图片会作为附件出现在输入框，直接发送即可</li>'
+              + '</ol>'
+              + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+              + '<button id="pp-guide-retry" style="border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary,#eee);border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;">再试屏幕捕获</button>'
+              + '</div>'
+            document.body.appendChild(wrap)
+            var retry = document.getElementById('pp-guide-retry')
+            if (retry !== null) retry.addEventListener('click', function () {
+              if (wrap.parentNode !== null) wrap.parentNode.removeChild(wrap)
+              void shoot()
+            })
+          } catch (e) { /* fallback best-effort */ }
+        }
         async function shoot() {
           if (typeof navigator === 'undefined' || navigator.mediaDevices === undefined
             || navigator.mediaDevices.getDisplayMedia === undefined) {
             toast('截图：此浏览器不支持屏幕捕获（需 HTTPS 或 localhost）')
             return
           }
-          // 点击立即反馈：busy 防抖但 30s 必释放
-          toast('正在请求屏幕捕获…')
+          // 点击立即反馈：busy 防抖但 15s 必释放
+          toast('正在请求屏幕捕获… 浏览器应弹出「选择要共享的屏幕」窗口')
           setBusy(true)
           var stream
           try {
             // 超时保护：部分浏览器在非用户激活上下文会静默挂起
             stream = await Promise.race([
               navigator.mediaDevices.getDisplayMedia({ video: true }),
-              new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout: getDisplayMedia')) }, 30000) }),
+              new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout: getDisplayMedia')) }, 15000) }),
             ])
           } catch (e) {
             setBusy(false)
             var ename = String((e && e.name) || (e && e.message) || e)
             if (ename.indexOf('timeout') >= 0) {
-              toast('截图：捕获请求超时（120s），请重试')
+              // 挂起/超时：选择窗口没弹出或没完成 → 给可靠的系统截图替代
+              showShotFallback('屏幕捕获选择窗口没有出现或没有完成选择（15s 超时）。')
             } else if (ename.indexOf('NotAllowed') >= 0 || ename.indexOf('Permission') >= 0 || ename.indexOf('denied') >= 0) {
               // 权限被拒 → 弹配置引导（含真实错误码 + 环境诊断）
               showPermissionGuide(e)
