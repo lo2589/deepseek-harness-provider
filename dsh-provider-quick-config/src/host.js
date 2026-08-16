@@ -148,8 +148,10 @@ module.exports = {
           body,
         })
         if (res.ok) {
+          // 端点接受了图片请求（返回 choices）即视为可读图；finish_reason 不影响能力判定
+          // （minicpm 等模型对图片常返回 length/空内容，但接受图片本身就是信号）
           const text = await res.text()
-          ok = text.indexOf('"choices"') >= 0 && text.indexOf('"finish_reason":"length"') < 0
+          ok = text.indexOf('"choices"') >= 0
         }
       } catch (e) {
         ok = false
