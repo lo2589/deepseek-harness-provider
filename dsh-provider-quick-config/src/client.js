@@ -695,18 +695,34 @@ window.__ModuleLoader__.load({
         var busyState = React.useState(false)
         var busy = busyState[0]
         var setBusy = busyState[1]
+        function toast(msg) {
+          // 全局轻提示：不依赖展示台面板是否打开
+          setState({ showcaseError: msg })
+          try {
+            var el = document.createElement('div')
+            el.textContent = String(msg)
+            el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;background:var(--dsw-specific-menu,#222);color:var(--dsw-alias-label-primary,#eee);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 14px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.35);pointer-events:none;'
+            document.body.appendChild(el)
+            setTimeout(function () { if (el.parentNode !== null) el.parentNode.removeChild(el) }, 3500)
+          } catch (e) { /* toast best-effort */ }
+        }
         async function shoot() {
           if (busy || typeof navigator === 'undefined' || navigator.mediaDevices === undefined
             || navigator.mediaDevices.getDisplayMedia === undefined) {
-            setState({ showcaseError: '此浏览器不支持屏幕捕获（需 HTTPS 或 localhost）' })
+            toast('截图：此浏览器不支持屏幕捕获（需 HTTPS 或 localhost）')
             return
           }
           setBusy(true)
           var stream
           try {
-            stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+            // 超时保护：部分浏览器在非用户激活上下文会静默挂起
+            stream = await Promise.race([
+              navigator.mediaDevices.getDisplayMedia({ video: true }),
+              new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout: getDisplayMedia')) }, 120000) }),
+            ])
           } catch (e) {
             setBusy(false)
+            toast('截图：未选择屏幕或捕获被拒绝')
             return
           }
           try {
@@ -720,7 +736,7 @@ window.__ModuleLoader__.load({
             canvas.getContext('2d').drawImage(video, 0, 0)
             var blob = await new Promise(function (res) { canvas.toBlob(res, 'image/png') })
             if (blob === null) {
-              setState({ showcaseError: '截图失败：画布无法导出' })
+              toast('截图失败：画布无法导出')
               return
             }
             // 存到工作区 .截图/（默认进多媒体库，不自动插入正文）
@@ -738,18 +754,20 @@ window.__ModuleLoader__.load({
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ name: 'screenshot-' + stamp + '.png', dataBase64: dataBase64 }),
             })
-            var saved = await res2.json()
-            if (!res2.ok || saved.path === undefined) {
-              setState({ showcaseError: '截图保存失败：' + (saved.error || ('HTTP ' + res2.status)) })
+            var saved = null
+            try { saved = await res2.json() } catch (e) { saved = null }
+            if (!res2.ok || saved === null || saved.path === undefined) {
+              toast('截图保存失败：' + ((saved !== null && saved.error) || ('HTTP ' + res2.status)) + '（host 需重启加载保存路由）')
               return
             }
             // 路径写进输入框（用户决定发不发）；刷新展示台让它出现
             var ia = store.showcaseInputActions
             if (ia !== null && typeof ia.setDraft === 'function') ia.setDraft(saved.path)
             setState({ showcaseError: null })
+            toast('截图已存入 ' + saved.path)
             if (s.showcaseOpen) void loadShowcase(s.showcaseSession)
           } catch (e) {
-            setState({ showcaseError: '截图失败：' + messageOf(e) })
+            toast('截图失败：' + messageOf(e))
           } finally {
             stream.getTracks().forEach(function (t) { t.stop() })
             setBusy(false)
