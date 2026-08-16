@@ -8,10 +8,12 @@ module.exports = {
   name: 'provider-quick-config',
   // ctx.interval is mixed onto ctx by the timer service, and a mixin accessor
   // throws `cannot get property "timer" without inject` rather than resolving
-  // to undefined. ctx.get('settings'|'credentials'|'llm') is the other kind —
-  // it returns undefined when unprovided — which is why only timer is declared
-  // here and the rest stay optional.
-  inject: ['timer'],
+  // to undefined. ctx.get('settings'|'credentials'|'llm'|'webServer') is the
+  // other kind — it returns undefined when unprovided — which is why only
+  // timer and webServer are declared here and the rest stay optional.
+  // webServer 必须硬依赖：bundle 加载早于 webServer 服务，声明后 Cordis 会等
+  // webServer 出现再 apply，媒体展示台的路由才能注册成功。
+  inject: ['timer', 'webServer'],
   apply(ctx) {
     const NS = 'llm-pi-ai'
     // Resolved per call, not captured at apply: a service that mounts after
@@ -181,12 +183,12 @@ module.exports = {
       }
     }
 
-    // ---- 媒体展示台：监听会话消息，收集提到 / 生成的图片、视频、录音 ----
-    // 数据不进模型上下文（对话里只是一段文本或工具产物），但"提到了就展示"：
-    // 从 user/message、assistant/message 的文本块里提取媒体文件名（支持相对工作目录路径），
-    // 按会话缓存条目；webServer 提供两个同源接口：
-    //   GET /plugins/provider-quick-config/media-list?session=<id>  → 条目列表 JSON
-    //   GET /plugins/provider-quick-config/media?session=<id>&p=<abs> → 文件内容（仅已缓存条目）
+    // ---- 媒体展示台：扫描式（不依赖事件监听，无 scope 限制）----
+    // 数据不进模型上下文；"提到了就展示"：client 拉会话历史 → host 用 sessionQuery
+    // 读该会话 cwd + 全部事件 → 提取媒体文件名（支持相对工作目录路径）→ fs 校验 → 返回。
+    // webServer 提供两个同源接口：
+    //   GET /plugins/provider-quick-config/media-list?session=<id>  → 扫描该会话返回条目 JSON
+    //   GET /plugins/provider-quick-config/media?p=<abs>            → 文件内容（扩展名白名单）
     const MEDIA_EXT = {
       '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
       '.webp': 'image/webp', '.bmp': 'image/bmp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
@@ -195,8 +197,6 @@ module.exports = {
       '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.opus': 'audio/ogg',
     }
     const MEDIA_RE = /[\w@\u4e00-\u9fa5\- ]+\.(?:png|jpe?g|gif|webp|bmp|svg|ico|mp4|webm|mov|mkv|avi|mp3|wav|m4a|aac|ogg|flac|opus)/gi
-    // 同一会话内按"规范化路径"去重，保留首次出现顺序
-    const mediaBySession = new Map()
     function normPath(p) {
       return String(p || '').replace(/\/+/g, '/').replace(/\/$/, '')
     }
@@ -207,166 +207,261 @@ module.exports = {
       if (mime.startsWith('audio/')) return 'audio'
       return 'other'
     }
-    async function resolveMediaPath(session, raw) {
+    function fsOf() { return ctx.get('fs') }
+    function queryOf(rawUrl) {
+      const out = {}
+      const q = String(rawUrl || '').split('?')[1]
+      if (q === undefined) return out
+      for (const pair of q.split('&')) {
+        const eq = pair.indexOf('=')
+        if (eq < 0) continue
+        const k = pair.slice(0, eq)
+        const v = pair.slice(eq + 1)
+        try { out[decodeURIComponent(k)] = decodeURIComponent(v) } catch (e) { out[k] = v }
+      }
+      return out
+    }
+    function extractMediaFromText(text) {
+      if (typeof text !== 'string') return []
+      const out = []
+      const matches = Array.from(text.matchAll(MEDIA_RE))
+      for (const m of matches) {
+        const token = m[0]
+        const lower = token.toLowerCase()
+        const lastDot = lower.lastIndexOf('.')
+        if (lastDot < 0) continue
+        const ext = lower.slice(lastDot)
+        if (MEDIA_EXT[ext] === undefined) continue
+        // 向左回溯：token 前若紧跟路径片段（含 / ~ : . 和中文/字母），并入候选
+        const before = text.slice(0, m.index)
+        let start = before.length
+        while (start > 0) {
+          const ch = before[start - 1]
+          if (/[\w@\u4e00-\u9fa5\-]/.test(ch) || ch === '/' || ch === '\\' || ch === '~' || ch === '.' || ch === ':') start--
+          else break
+        }
+        let raw = before.slice(start) + token
+        raw = raw.replace(/^[.,，。、;；:：""''()（）\s]+/, '')
+        if (raw === '') raw = token
+        out.push({ raw, ext })
+      }
+      return out
+    }
+    async function resolveWithCwd(cwd, raw) {
       let t = String(raw || '').trim()
       if (t === '') return undefined
       if (t.startsWith('~')) {
         try { t = t.replace(/^~/, process.env.HOME || '') } catch (e) {}
       }
-      const cwd = session !== undefined && session !== null && typeof session.header === 'object' && typeof session.header.cwd === 'string'
-        ? session.header.cwd.replace(/\/+$/, '') : undefined
       const candidates = []
       if (t.startsWith('/')) {
         candidates.push(t)
       } else if (/^[A-Za-z]:\//.test(t)) {
         candidates.push(t)
-      } else if (cwd !== undefined) {
+      } else if (cwd !== undefined && cwd !== '') {
+        const c = cwd.replace(/\/+$/, '')
         // 整段作为相对路径试一次
-        candidates.push(cwd + '/' + t)
+        candidates.push(c + '/' + t)
         // 中文描述 + 文件名（如“仅文件名 pic.jpg”）：回退到最后一段纯文件名
         const tail = t.split(/[\s/\\]+/).pop()
         if (tail !== undefined && tail !== t && /\.(?:png|jpe?g|gif|webp|bmp|svg|ico|mp4|webm|mov|mkv|avi|mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(tail)) {
-          candidates.push(cwd + '/' + tail)
+          candidates.push(c + '/' + tail)
         }
       }
+      const fsSvc = fsOf()
+      if (fsSvc === undefined) return undefined
       for (const c of candidates) {
         try {
-          const fs = fsOf()
-          if (fs === undefined) return undefined
-          const target = await fs.resolve(c)
-          const info = await fs.stat(target)
-          if (info !== undefined && info.type === 'file' && info.size > 0) return { path: c, size: info.size }
+          const target = await fsSvc.resolve(c)
+          const info = await fsSvc.stat(target)
+          if (info !== undefined && info.type === 'file' && info.size > 0) {
+            const lower = c.toLowerCase()
+            const lastDot = lower.lastIndexOf('.')
+            const ext = lastDot >= 0 ? lower.slice(lastDot) : ''
+            return { path: normPath(c), name: c.split('/').pop(), ext, kind: mediaKind(ext), size: info.size }
+          }
         } catch (e) { /* try next candidate */ }
       }
-      return undefined
-    }
-    function fsOf() { return ctx.get('fs') }
-    function extractMedia(session, blocks) {
-      if (!Array.isArray(blocks)) return []
-      const out = []
-      for (const b of blocks) {
-        if (b === null || typeof b !== 'object') continue
-        if (b.type === 'text' && typeof b.text === 'string') {
-          const matches = Array.from(b.text.matchAll(MEDIA_RE))
-          if (matches.length === 0) continue
-          for (const m of matches) {
-            const token = m[0]
-            const lower = token.toLowerCase()
+      // 兜底：路径猜不到但运行时的文件一定在磁盘上（可能缺中间目录前缀）。
+      // 在会话工作区里按文件名递归搜索，最多 4 层、每层 400 个目录、命中 5 个即止。
+      if (cwd !== undefined && cwd !== '' && !t.startsWith('/')) {
+        const base = cwd.replace(/\/+$/, '')
+        const baseName = t.split(/[\\/]+/).pop()
+        if (baseName !== undefined && baseName !== '' && /\.(?:png|jpe?g|gif|webp|bmp|svg|ico|mp4|webm|mov|mkv|avi|mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(baseName)) {
+          const found = await findFileByName(base, baseName, 0, 4)
+          if (found !== undefined) {
+            const lower = found.path.toLowerCase()
             const lastDot = lower.lastIndexOf('.')
-            if (lastDot < 0) continue
-            const ext = lower.slice(lastDot)
-            if (MEDIA_EXT[ext] === undefined) continue
-            // 向左回溯：token 前若紧跟路径片段（含 / ~ : . 和中文/字母），并入候选
-            const before = b.text.slice(0, m.index)
-            let start = before.length
-            while (start > 0) {
-              const ch = before[start - 1]
-              if (/[\w@\u4e00-\u9fa5\-]/.test(ch) || ch === '/' || ch === '\\' || ch === '~' || ch === '.' || ch === ':') start--
-              else break
-            }
-            let raw = before.slice(start) + token
-            // 去掉常见标点残留
-            raw = raw.replace(/^[.,，。、;；:：""''()（）\s]+/, '')
-            if (raw === '') raw = token
-            out.push({ raw, ext })
+            const ext = lastDot >= 0 ? lower.slice(lastDot) : ''
+            return { path: normPath(found.path), name: found.path.split('/').pop(), ext, kind: mediaKind(ext), size: found.size }
           }
         }
       }
-      return out
+      return undefined
     }
-    async function ingestSessionEvent(session, event) {
-      if (session === undefined || event === undefined || typeof event !== 'object') return
-      const type = event.type
-      const data = event.data
-      if (data === null || typeof data !== 'object') return
-      const blocks = type === 'user/message' && Array.isArray(data.content)
-        ? data.content
-        : type === 'assistant/message' && data.message !== null && typeof data.message === 'object' && Array.isArray(data.message.content)
-          ? data.message.content
-          : undefined
-      if (blocks === undefined) return
-      const sid = typeof session.id === 'string' ? session.id : (typeof session.header === 'object' ? session.header.id : undefined)
-      if (sid === undefined) return
-      const found = extractMedia(session, blocks)
-      if (found.length === 0) return
-      let list = mediaBySession.get(sid)
-      if (list === undefined) { list = []; mediaBySession.set(sid, list) }
-      let changed = false
-      for (const f of found) {
-        const resolved = await resolveMediaPath(session, f.raw)
-        if (resolved === undefined) continue
-        const key = normPath(resolved.path)
-        if (list.some((x) => x.path === key)) continue
-        list.push({ path: key, name: f.raw.split('/').pop(), ext: f.ext, kind: mediaKind(f.ext), size: resolved.size })
-        changed = true
+    // 递归按文件名搜索：正式 host 用 node:fs，动态 host 用 fs 服务 listDir。
+    async function findFileByName(dir, name, depth, maxDepth) {
+      if (depth > maxDepth) return undefined
+      let nodeFs
+      try { nodeFs = require('node:fs') } catch (e) { nodeFs = undefined }
+      if (nodeFs !== undefined) {
+        return await findNode(dir, name, depth, maxDepth, nodeFs)
       }
-      if (changed && mediaBySession.size > 200) {
-        // 防内存膨胀：超过 200 个会话时清掉最旧的
-        const first = mediaBySession.keys().next().value
-        mediaBySession.delete(first)
-      }
+      // 动态 host：用 fs 服务 listDir 递归
+      const fsSvc = fsOf()
+      if (fsSvc === undefined || typeof fsSvc.listDir !== 'function') return undefined
+      try {
+        const target = await fsSvc.resolve(dir)
+        const entries = await fsSvc.listDir(target)
+        let scanned = 0
+        for (const e of entries) {
+          if (e === null || typeof e !== 'object') continue
+          if (e.type === 'file' && e.name === name) {
+            const info = await fsSvc.stat(e.target)
+            if (info !== undefined && info.type === 'file' && info.size > 0) {
+              return { path: dir.replace(/\/+$/, '') + '/' + e.name, size: info.size }
+            }
+          }
+          if (e.type === 'directory' && ++scanned <= 400) {
+            const sub = await findFileByName(dir.replace(/\/+$/, '') + '/' + e.name, name, depth + 1, maxDepth)
+            if (sub !== undefined) return sub
+          }
+        }
+      } catch (e) { /* skip unreadable dirs */ }
+      return undefined
     }
-    function webServerOf() { return ctx.get('webServer') }
+    async function findNode(dir, name, depth, maxDepth, nodeFs) {
+      if (depth > maxDepth) return undefined
+      let entries
+      try { entries = nodeFs.readdirSync(dir, { withFileTypes: true }) } catch (e) { return undefined }
+      let scanned = 0
+      for (const e of entries) {
+        if (e.isFile() && e.name === name) {
+          try {
+            const st = nodeFs.statSync(dir + '/' + e.name)
+            if (st.isFile() && st.size > 0) {
+              return { path: normPath(dir + '/' + e.name), size: st.size }
+            }
+          } catch (err) { /* skip */ }
+        }
+        if (e.isDirectory() && ++scanned <= 400) {
+          const sub = await findNode(dir + '/' + e.name, name, depth + 1, maxDepth, nodeFs)
+          if (sub !== undefined) return sub
+        }
+      }
+      return undefined
+    }
+    async function scanSessionMedia(sid) {
+      let cwd = undefined
+      // { turn, text } 列表，按事件顺序
+      const texts = []
+      try {
+        const sq = ctx.get('sessionQuery')
+        if (sq !== undefined && typeof sq.readSession === 'function') {
+          const snap = await sq.readSession(sid)
+          if (snap !== undefined && snap !== null) {
+            if (snap.session !== undefined && snap.session !== null && typeof snap.session.cwd === 'string') cwd = snap.session.cwd
+            if (Array.isArray(snap.events)) {
+              let currentTurn = 0
+              for (const ev of snap.events) {
+                if (ev === null || typeof ev !== 'object') continue
+                const d = ev.data
+                if (d === null || typeof d !== 'object') continue
+                if (ev.type === 'turn/start' && typeof d.turn === 'number') {
+                  currentTurn = d.turn
+                } else if (ev.type === 'user/message' && Array.isArray(d.content)) {
+                  for (const b of d.content) {
+                    if (b !== null && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string') texts.push({ turn: currentTurn, text: b.text })
+                  }
+                } else if (ev.type === 'assistant/message' && d.message !== null && typeof d.message === 'object' && Array.isArray(d.message.content)) {
+                  const t = typeof d.turn === 'number' ? d.turn : currentTurn
+                  for (const b of d.message.content) {
+                    if (b !== null && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string') texts.push({ turn: t, text: b.text })
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) { /* sessionQuery may be unavailable */ }
+      const seen = new Set()
+      const items = []
+      for (const entry of texts) {
+        const found = extractMediaFromText(entry.text)
+        for (const f of found) {
+          const key = normPath(f.raw)
+          if (seen.has(key)) continue
+          seen.add(key)
+          const resolved = await resolveWithCwd(cwd, f.raw)
+          if (resolved === undefined) continue
+          if (items.some((x) => x.path === resolved.path)) continue
+          // 带轮次：同一文件可能在多轮被提到，只记首次出现的轮次
+          items.push(Object.assign({ turn: entry.turn }, resolved))
+        }
+      }
+      return items
+    }
     function attachMediaRoutes() {
-      const server = webServerOf()
+      const server = ctx.get('webServer')
       if (server === undefined || typeof server.register !== 'function') return
-      // 列表接口：?session=<id>
+      // 列表接口：实时扫描 ?session=<id>
       const listDisposer = server.register({
         kind: 'exact',
         path: '/plugins/provider-quick-config/media-list',
         handler: async (req, res) => {
-          let sid = ''
+          const q = queryOf(req.url)
+          const sid = q.session || ''
+          if (sid === '') {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'missing session' }))
+            return
+          }
           try {
-            const u = new URL(req.url, 'http://127.0.0.1')
-            sid = u.searchParams.get('session') || ''
-          } catch (e) {}
-          const list = sid !== '' ? (mediaBySession.get(sid) || []) : []
-          const body = JSON.stringify({ items: list })
-          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(body)
+            const items = await scanSessionMedia(sid)
+            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+            res.end(JSON.stringify({ items }))
+          } catch (e) {
+            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: String((e && e.message) || e) }))
+          }
         },
       })
-      // 文件接口：?session=<id>&p=<绝对路径>（仅已缓存条目，防目录穿越任意读）
+      // 文件接口：?p=<绝对路径>（扩展名白名单 + fs 校验，防任意读）
       const fileDisposer = server.register({
         kind: 'exact',
         path: '/plugins/provider-quick-config/media',
         handler: async (req, res) => {
-          let sid = ''
-          let p = ''
-          try {
-            const u = new URL(req.url, 'http://127.0.0.1')
-            sid = u.searchParams.get('session') || ''
-            p = u.searchParams.get('p') || ''
-          } catch (e) {}
-          const list = sid !== '' ? (mediaBySession.get(sid) || []) : []
-          const key = normPath(p)
-          const entry = list.find((x) => x.path === key)
-          if (entry === undefined) {
+          const q = queryOf(req.url)
+          const p = q.p || ''
+          const lower = p.toLowerCase()
+          const lastDot = lower.lastIndexOf('.')
+          const ext = lastDot >= 0 ? lower.slice(lastDot) : ''
+          const mime = MEDIA_EXT[ext]
+          if (mime === undefined || p === '') {
             res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-            res.end('not-found')
+            res.end('unsupported')
             return
           }
-          const mime = MEDIA_EXT[entry.ext] || 'application/octet-stream'
           try {
-            const fs = fsOf()
-            if (fs === undefined) throw new Error('fs unavailable')
-            const target = await fs.resolve(entry.path)
-            const info = await fs.stat(target)
+            const fsSvc = fsOf()
+            if (fsSvc === undefined) throw new Error('fs unavailable')
+            const target = await fsSvc.resolve(p)
+            const info = await fsSvc.stat(target)
             if (info === undefined || info.type !== 'file') throw new Error('not a file')
-            // 流式返回（视频/录音可能很大）；不设 Content-Length 走 chunked
+            const cap = 200 * 1024 * 1024
+            if (info.size > cap) {
+              res.writeHead(413, { 'content-type': 'text/plain; charset=utf-8' })
+              res.end('too-large')
+              return
+            }
+            const bytes = await fsSvc.readBytes(target, undefined, cap)
             res.writeHead(200, {
               'content-type': mime,
               'accept-ranges': 'bytes',
               'cache-control': 'private, max-age=60',
               'x-content-type-options': 'nosniff',
             })
-            // fs.readBytes 有上限，这里直接用 node 的 fs 流；profile 进程里 node:fs 可用
-            const nodeFs = require('node:fs')
-            const nodePath = require('node:path')
-            const abs = nodePath.resolve(entry.path)
-            const stream = nodeFs.createReadStream(abs)
-            stream.on('error', () => { res.destroy() })
-            stream.pipe(res)
+            res.end(bytes)
           } catch (e) {
             if (!res.headersSent) {
               res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
@@ -383,34 +478,11 @@ module.exports = {
     // 后台自动同步；ctx.setInterval 是 fiber 作用域定时器，插件卸载自动清理。
     // 读图能力：启动时测一轮写表（input: [text, image]），之后配置即表，不重复测。
     const disposeMediaRoutes = attachMediaRoutes()
-    const disposeSessionListener = ctx.on('session/event', (session, event) => { void ingestSessionEvent(session, event) })
     ctx.effect(() => {
       return () => {
         try { if (disposeMediaRoutes !== undefined) disposeMediaRoutes() } catch (e) {}
-        try { if (disposeSessionListener !== undefined) disposeSessionListener() } catch (e) {}
       }
     })
-    // 启动回填：对当前活跃会话先扫一遍已有历史，让"提到过"的媒体立刻出现在展示台
-    async function backfillMedia() {
-      try {
-        const sessionsSvc = ctx.get('sessions')
-        if (sessionsSvc === undefined || typeof sessionsSvc.list !== 'function') return
-        const all = sessionsSvc.list()
-        if (!Array.isArray(all)) return
-        for (const s of all) {
-          try {
-            if (s === undefined || s === null || typeof s.deriveMessages !== 'function') continue
-            const messages = s.deriveMessages()
-            if (!Array.isArray(messages)) continue
-            for (const msg of messages) {
-              if (msg === null || typeof msg !== 'object' || !Array.isArray(msg.content)) continue
-              await ingestSessionEvent(s, { type: msg.role === 'user' ? 'user/message' : 'assistant/message', data: msg })
-            }
-          } catch (e) { /* one session must not break the sweep */ }
-        }
-      } catch (e) { /* backfill best-effort */ }
-    }
-    void backfillMedia()
     void probeAll()
     ctx.interval(() => { void syncAll() }, 60000)
     void syncAll()
