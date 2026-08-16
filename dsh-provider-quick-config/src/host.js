@@ -178,7 +178,7 @@ module.exports = {
     }
 
     // 后台自动同步；ctx.setInterval 是 fiber 作用域定时器，插件卸载自动清理。
-    ctx.interval(() => { void probeAll() }, 600000)
+    // 读图能力：启动时测一轮写表（input: [text, image]），之后配置即表，不重复测。
     void probeAll()
     ctx.interval(() => { void syncAll() }, 60000)
     void syncAll()
