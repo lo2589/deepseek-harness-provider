@@ -247,7 +247,7 @@ module.exports = {
       }
       return out
     }
-    async function resolveWithCwd(cwd, raw) {
+    async function resolveWithCwd(cwd, raw, searchRoots) {
       let t = String(raw || '').trim()
       if (t === '') return undefined
       if (t.startsWith('~')) {
@@ -282,18 +282,20 @@ module.exports = {
           }
         } catch (e) { /* try next candidate */ }
       }
-      // 兜底：路径猜不到但运行时的文件一定在磁盘上（可能缺中间目录前缀）。
-      // 在会话工作区里按文件名递归搜索，最多 4 层、每层 400 个目录、命中 5 个即止。
-      if (cwd !== undefined && cwd !== '' && !t.startsWith('/')) {
-        const base = cwd.replace(/\/+$/, '')
+      // 兜底：路径猜不到但运行时的文件一定在磁盘上（可能缺中间目录前缀，或文件在别的项目目录）。
+      // 对每个搜索根（会话 cwd + 历史里出现过的绝对路径目录）按文件名递归搜索，最多 4 层/根。
+      if (!t.startsWith('/') && Array.isArray(searchRoots)) {
         const baseName = t.split(/[\\/]+/).pop()
         if (baseName !== undefined && baseName !== '' && /\.(?:png|jpe?g|gif|webp|bmp|svg|ico|mp4|webm|mov|mkv|avi|mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(baseName)) {
-          const found = await findFileByName(base, baseName, 0, 4)
-          if (found !== undefined) {
-            const lower = found.path.toLowerCase()
-            const lastDot = lower.lastIndexOf('.')
-            const ext = lastDot >= 0 ? lower.slice(lastDot) : ''
-            return { path: normPath(found.path), name: found.path.split('/').pop(), ext, kind: mediaKind(ext), size: found.size }
+          for (const root of searchRoots) {
+            if (root === undefined || root === '') continue
+            const found = await findFileByName(root.replace(/\/+$/, ''), baseName, 0, 4)
+            if (found !== undefined) {
+              const lower = found.path.toLowerCase()
+              const lastDot = lower.lastIndexOf('.')
+              const ext = lastDot >= 0 ? lower.slice(lastDot) : ''
+              return { path: normPath(found.path), name: found.path.split('/').pop(), ext, kind: mediaKind(ext), size: found.size }
+            }
           }
         }
       }
@@ -386,13 +388,23 @@ module.exports = {
       } catch (e) { /* sessionQuery may be unavailable */ }
       const seen = new Set()
       const items = []
+      // 搜索根：会话 cwd + 历史文本里出现过的绝对路径目录（跨项目引用的文件靠这个找到）
+      const searchRoots = []
+      if (cwd !== undefined && cwd !== '') searchRoots.push(cwd)
+      const absDirRe = /((?:\/[A-Za-z0-9._\-]+){2,})\/(?:[\w@\u4e00-\u9fa5\- ]+\/)*/g
+      for (const entry of texts) {
+        const dirs = Array.from(entry.text.matchAll(absDirRe)).map(function (m) { return m[1] })
+        for (const d of dirs) {
+          if (d !== undefined && d !== '' && !searchRoots.some(function (r) { return r === d })) searchRoots.push(d)
+        }
+      }
       for (const entry of texts) {
         const found = extractMediaFromText(entry.text)
         for (const f of found) {
           const key = normPath(f.raw)
           if (seen.has(key)) continue
           seen.add(key)
-          const resolved = await resolveWithCwd(cwd, f.raw)
+          const resolved = await resolveWithCwd(cwd, f.raw, searchRoots)
           if (resolved === undefined) continue
           if (items.some((x) => x.path === resolved.path)) continue
           // 带轮次：同一文件可能在多轮被提到，只记首次出现的轮次
