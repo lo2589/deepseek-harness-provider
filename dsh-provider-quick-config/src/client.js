@@ -706,6 +706,43 @@ window.__ModuleLoader__.load({
             setTimeout(function () { if (el.parentNode !== null) el.parentNode.removeChild(el) }, 3500)
           } catch (e) { /* toast best-effort */ }
         }
+        // 权限引导浮层：屏幕捕获被拒时弹出，带"去系统设置"和"重试"
+        function showPermissionGuide() {
+          try {
+            var old = document.getElementById('pp-shot-guide')
+            if (old !== null && old.parentNode !== null) old.parentNode.removeChild(old)
+            var wrap = document.createElement('div')
+            wrap.id = 'pp-shot-guide'
+            wrap.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9998;width:min(380px,calc(100vw-48px));background:var(--dsw-specific-menu,#1f1f1f);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);padding:18px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary,#eee);font-family:inherit;'
+            wrap.innerHTML =
+              '<div style="font-weight:600;font-size:15px;margin-bottom:8px;">需要屏幕捕获权限</div>'
+              + '<div style="color:var(--dsw-alias-label-secondary,#999);margin-bottom:12px;">浏览器拒绝了屏幕捕获请求。请按下面任一步骤允许后重试：</div>'
+              + '<ol style="margin:0 0 14px 18px;padding:0;color:var(--dsw-alias-label-primary,#eee);">'
+              + '<li>macOS：打开「系统设置 → 隐私与安全性 → 屏幕录制」，勾选你的浏览器（Chrome/Safari/Edge），然后<b>完全退出浏览器再打开</b>（只刷新不生效）</li>'
+              + '<li>浏览器：点击地址栏左侧的权限图标（摄像头/屏幕图标），把「屏幕录制」改为允许</li>'
+              + '</ol>'
+              + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+              + '<button id="pp-guide-retry" style="border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary,#eee);border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;">重试</button>'
+              + '<button id="pp-guide-settings" style="border:none;background:var(--dsw-alias-brand-primary,#4f8cff);color:#fff;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;font-weight:600;">打开系统设置</button>'
+              + '</div>'
+            document.body.appendChild(wrap)
+            var retry = document.getElementById('pp-guide-retry')
+            if (retry !== null) retry.addEventListener('click', function () {
+              if (wrap.parentNode !== null) wrap.parentNode.removeChild(wrap)
+              void shoot()
+            })
+            var settings = document.getElementById('pp-guide-settings')
+            if (settings !== null) settings.addEventListener('click', function () {
+              // mac 系统屏幕录制设置页；其它平台尝试浏览器权限页
+              try {
+                window.open('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture', '_blank')
+              } catch (e) { /* protocol may be blocked */ }
+              setTimeout(function () {
+                if (wrap.parentNode !== null) wrap.parentNode.removeChild(wrap)
+              }, 3000)
+            })
+          } catch (e) { /* guide best-effort */ }
+        }
         async function shoot() {
           if (busy || typeof navigator === 'undefined' || navigator.mediaDevices === undefined
             || navigator.mediaDevices.getDisplayMedia === undefined) {
@@ -722,7 +759,17 @@ window.__ModuleLoader__.load({
             ])
           } catch (e) {
             setBusy(false)
-            toast('截图：未选择屏幕或捕获被拒绝')
+            var ename = String((e && e.name) || (e && e.message) || e)
+            if (ename.indexOf('timeout') >= 0) {
+              toast('截图：捕获请求超时（120s），请重试')
+            } else if (ename.indexOf('NotAllowed') >= 0 || ename.indexOf('Permission') >= 0 || ename.indexOf('denied') >= 0) {
+              // 权限被拒 → 弹配置引导
+              showPermissionGuide()
+            } else if (ename.indexOf('NotFound') >= 0 || ename.indexOf('Unsupported') >= 0) {
+              toast('截图：当前环境不支持屏幕捕获（远程/无屏幕会话可能不行）')
+            } else {
+              toast('截图失败：' + ename)
+            }
             return
           }
           try {
