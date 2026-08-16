@@ -448,19 +448,54 @@ module.exports = {
             const target = await fsSvc.resolve(p)
             const info = await fsSvc.stat(target)
             if (info === undefined || info.type !== 'file') throw new Error('not a file')
+            const size = info.size
             const cap = 200 * 1024 * 1024
-            if (info.size > cap) {
+            if (size > cap) {
               res.writeHead(413, { 'content-type': 'text/plain; charset=utf-8' })
               res.end('too-large')
               return
             }
-            const bytes = await fsSvc.readBytes(target, undefined, cap)
-            res.writeHead(200, {
+            const baseHeaders = {
               'content-type': mime,
               'accept-ranges': 'bytes',
               'cache-control': 'private, max-age=60',
               'x-content-type-options': 'nosniff',
-            })
+            }
+            // Range 支持：浏览器 <video>/<audio> 播放需要 206 Partial Content
+            const range = String(req.headers.range || '').match(/bytes=(\d*)-(\d*)/)
+            if (range !== null) {
+              const start = range[1] !== '' ? parseInt(range[1], 10) : 0
+              const end = range[2] !== '' ? parseInt(range[2], 10) : size - 1
+              if (!isFinite(start) || start < 0 || start >= size) {
+                res.writeHead(416, Object.assign({}, baseHeaders, { 'content-range': 'bytes */' + size }))
+                res.end()
+                return
+              }
+              const chunkEnd = Math.min(end, size - 1)
+              const length = chunkEnd - start + 1
+              res.writeHead(206, Object.assign({}, baseHeaders, {
+                'content-range': 'bytes ' + start + '-' + chunkEnd + '/' + size,
+                'content-length': String(length),
+              }))
+              // 有 node:fs 就流式读分片；没有就整读后切
+              let nodeFs
+              try { nodeFs = require('node:fs') } catch (e) { nodeFs = undefined }
+              if (nodeFs !== undefined) {
+                const nodePath = require('node:path')
+                const abs = nodePath.resolve(p)
+                const stream = nodeFs.createReadStream(abs, { start, end: chunkEnd })
+                stream.on('error', () => { res.destroy() })
+                stream.pipe(res)
+              } else {
+                const bytes = await fsSvc.readBytes(target, undefined, cap)
+                const slice = bytes.subarray(start, chunkEnd + 1)
+                res.end(slice)
+              }
+              return
+            }
+            // 无 Range：整文件
+            const bytes = await fsSvc.readBytes(target, undefined, cap)
+            res.writeHead(200, Object.assign({}, baseHeaders, { 'content-length': String(size) }))
             res.end(bytes)
           } catch (e) {
             if (!res.headersSent) {
