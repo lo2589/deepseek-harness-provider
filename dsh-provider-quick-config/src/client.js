@@ -54,6 +54,7 @@ window.__ModuleLoader__.load({
             if (m !== null && typeof m === 'object' && typeof m.name === 'string') mm.name = m.name
             if (m !== null && typeof m === 'object' && typeof m.contextWindow === 'number') mm.contextWindow = m.contextWindow
             if (m !== null && typeof m === 'object' && typeof m.maxTokens === 'number') mm.maxTokens = m.maxTokens
+            if (m !== null && typeof m === 'object' && m.image === true) mm.image = true
             return mm
           })
           : undefined
@@ -69,6 +70,9 @@ window.__ModuleLoader__.load({
           compat: raw.compat !== undefined && typeof raw.compat === 'object' && typeof raw.compat.thinkingFormat === 'string'
             ? { thinkingFormat: raw.compat.thinkingFormat } : undefined,
           models,
+          imageModels: (Array.isArray(models) ? models : []).filter(function (m) {
+            return m.image === true || /(gpt-4o|gpt-4\.1|o3\b|o4\b|claude|minicpm|glm-4\.6v|vision|gemini|llava|qwen2\.5-vl)/i.test(m.id)
+          }),
           syncModels: raw.syncModels === true,
           catalog: catalogKeys.has(e.key) && !hasOwnEndpoint,
           credential: cred !== undefined
@@ -608,6 +612,60 @@ window.__ModuleLoader__.load({
               h('path', { d: 'M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z', fill: 'currentColor' }))))
       }
 
+      function fileToBase64(file) {
+        return new Promise(function (res, rej) {
+          var reader = new FileReader()
+          reader.onload = function () { res(String(reader.result).split(',')[1]) }
+          reader.onerror = rej
+          reader.readAsDataURL(file)
+        })
+      }
+
+      async function readAgent(sessionId, imageIds, draftText) {
+        var conv = ctx.get('conversation')
+        if (conv === undefined || store.data === null) return
+        var routes = store.data.providers.filter(function (p) { return Array.isArray(p.imageModels) && p.imageModels.length > 0 })
+        if (routes.length === 0) { setState({ notice: '还没有可读图的模型（读图能力测试完成后自动出现，稍后再试）' }); return }
+        var route = routes.find(function (p) { return p.imageDefault === true }) || routes[0]
+        var model = route.imageModels[0].id
+        var atts = conv.draftImages(imageIds) || []
+        var parts = []
+        if (typeof draftText === 'string' && draftText.trim() !== '') parts.push({ type: 'text', text: draftText })
+        for (var i = 0; i < atts.length; i++) {
+          var a = atts[i]
+          if (a === undefined || a.file === undefined) continue
+          try {
+            var b64 = await fileToBase64(a.file)
+            parts.push({ type: 'image', mediaType: a.file.type || 'image/png', data: b64, name: a.file.name })
+          } catch (e) { /* skip unreadable */ }
+        }
+        if (parts.length === 0) return
+        setState({ busy: true, error: null, notice: null })
+        try {
+          var createRes = await api.sessions.create({})
+          if (!createRes.result.ok) throw new Error(createRes.result.error.message)
+          var sid = createRes.result.value.sessionId
+          var sm = await api.sessions.selectModel({ sessionId: sid, provider: route.key, model: model })
+          if (!sm.result.ok) throw new Error(sm.result.error.message)
+          var pr = await api.sessions.prompt({ sessionId: sid, mode: 'queue', content: parts })
+          if (!pr.result.ok) throw new Error(pr.result.error.message)
+          if (ctx.get('sessions') !== undefined) ctx.get('sessions').open(sid)
+          setState({ busy: false, notice: '已发送到读图 Agent（' + (route.displayName || route.key) + ' / ' + model + '），结果在打开的会话里' })
+        } catch (e) {
+          setState({ busy: false, error: '读图失败: ' + messageOf(e) })
+        }
+      }
+
+      function ReadAgentButton(props) {
+        var imageIds = props.useInput !== undefined ? props.useInput(function (st) { return st ? st.imageIds : [] }) : []
+        var draftText = props.useInput !== undefined ? props.useInput(function (st) { return st ? st.draft : '' }) : ''
+        if (imageIds.length === 0) return null
+        return h('button', { type: 'button', className: 'pp-plus pp-read', title: '用读图 Agent 处理图片',
+          'aria-label': '读图', onClick: function () { void readAgent(props.sessionId, imageIds, draftText) } },
+          h('svg', { viewBox: '0 0 24 24', width: 15, height: 15, 'aria-hidden': true },
+            h('path', { d: 'M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1Z', fill: 'currentColor' })))
+      }
+
       function ScreenshotButton(props) {
         var busyState = React.useState(false)
         var busy = busyState[0]
@@ -658,22 +716,20 @@ window.__ModuleLoader__.load({
 
       function PlusButton(props) {
         var sessions = ctx.get('sessions')
-        var switchedRef = React.useRef(null)
+        var readRef = React.useRef(null)
         var imageIds = props.useInput !== undefined ? props.useInput(function (st) { return st ? st.imageIds : [] }) : []
+        var draftText = props.useInput !== undefined ? props.useInput(function (st) { return st ? st.draft : '' }) : ''
         React.useEffect(function () {
           if (imageIds.length === 0 || sessions === undefined || store.data === null) return
-          var imageRoutes = store.data.providers.filter(function (p) { return p.image === true })
-          var def = imageRoutes.find(function (p) { return p.imageDefault === true }) || imageRoutes[0]
-          if (def === undefined || switchedRef.current === props.sessionId) return
           sessions.models({ sessionId: props.sessionId }).then(function (res) {
             if (!res.result.ok) return
             var cur = res.result.value.current
             if (cur === null || cur === undefined) return
-            if (imageRoutes.some(function (p) { return p.key === cur.provider }) || cur.provider === def.key) return
-            var model = Array.isArray(def.models) && def.models.length > 0 ? def.models[0].id : undefined
-            if (model === undefined) return
-            switchedRef.current = props.sessionId
-            sessions.selectModel({ sessionId: props.sessionId, provider: def.key, model: model })
+            var capable = store.data.providers.some(function (p) { return p.key === cur.provider
+              && (p.image === true || (Array.isArray(p.imageModels) && p.imageModels.some(function (m) { return m.id === cur.model }))) })
+            if (capable || readRef.current === props.sessionId) return
+            readRef.current = props.sessionId
+            void readAgent(props.sessionId, imageIds, draftText)
           })
         }, [imageIds.length, props.sessionId, store.data])
         useStore()
@@ -852,6 +908,10 @@ window.__ModuleLoader__.load({
       slots.inject('conversation.session.header.utilities', () => slots.register(
         { name: 'conversation.session.header.utilities', id: 'history-search', order: 1 },
         () => React.createElement(HistorySearch),
+      ))
+      slots.inject('conversation.input.right', () => slots.register(
+        { name: 'conversation.input.right', id: 'read-agent-btn', order: -3 },
+        (props) => React.createElement(ReadAgentButton, props),
       ))
       slots.inject('conversation.input.right', () => slots.register(
         { name: 'conversation.input.right', id: 'upload-btn', order: -2 },

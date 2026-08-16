@@ -17,6 +17,7 @@ return {
     const credentialsOf = () => ctx.get('credentials')
     const llmOf = () => ctx.get('llm')
     const PROTOCOLS = ['openai-completions', 'openai-responses', 'anthropic-messages']
+    const VISION = /(gpt-4o|gpt-4\.1|o3\b|o4\b|claude|minicpm|glm-4\.6v|vision|gemini|llava|qwen2\.5-vl)/i
     const THINKING = ['openai', 'deepseek', 'openrouter', 'together', 'zai', 'qwen', 'string-thinking', 'ant-ling']
 
     function omitUndefined(obj) {
@@ -103,6 +104,9 @@ return {
             : undefined
           const hasOwnEndpoint = typeof raw.baseURL === 'string' || typeof raw.api === 'string'
             || (Array.isArray(raw.models) && raw.models.length > 0)
+          const imageModels = raw.image === true
+            ? models
+            : (Array.isArray(models) ? models.filter((m) => VISION.test(m.id)) : undefined)
           providers.push(omitUndefined({
             key,
             displayName: typeof raw.displayName === 'string' && raw.displayName ? raw.displayName : key,
@@ -113,6 +117,7 @@ return {
               ? { thinkingFormat: raw.compat.thinkingFormat }
               : undefined,
             models,
+            imageModels,
             syncModels: raw.syncModels === true,
             image: raw.image === true,
             imageDefault: raw.imageDefault === true,

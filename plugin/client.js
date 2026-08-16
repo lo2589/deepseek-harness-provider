@@ -584,15 +584,21 @@ return {
       const switchedRef = React.useRef(null)
       React.useEffect(() => {
         if (imageIds.length === 0 || sessions === undefined || s.data === null) return
-        const imageRoutes = s.data.providers.filter((p) => p.image === true)
-        const def = imageRoutes.find((p) => p.imageDefault === true) || imageRoutes[0]
-        if (def === undefined || switchedRef.current === sessionId) return
+        const isCapable = (route, provider, model) => route.key === provider
+          && (route.image === true || (Array.isArray(route.imageModels) && route.imageModels.some((m) => m.id === model)))
+        const imageRoutes = s.data.providers.filter((p) => p.image === true
+          || (Array.isArray(p.imageModels) && p.imageModels.length > 0))
+        if (imageRoutes.length === 0 || switchedRef.current === sessionId) return
         sessions.models({ sessionId }).then((res) => {
           if (!res.result.ok) return
           const cur = res.result.value.current
           if (cur === null || cur === undefined) return
-          if (imageRoutes.some((p) => p.key === cur.provider) || cur.provider === def.key) return
-          const model = Array.isArray(def.models) && def.models.length > 0 ? def.models[0].id : undefined
+          if (imageRoutes.some((p) => isCapable(p, cur.provider, cur.model))) return
+          const def = imageRoutes.find((p) => p.imageDefault === true) || imageRoutes[0]
+          if (def === undefined) return
+          const model = def.image === true
+            ? (Array.isArray(def.models) && def.models.length > 0 ? def.models[0].id : undefined)
+            : (Array.isArray(def.imageModels) && def.imageModels.length > 0 ? def.imageModels[0].id : undefined)
           if (model === undefined) return
           switchedRef.current = sessionId
           sessions.selectModel({ sessionId, provider: def.key, model })
@@ -656,7 +662,7 @@ return {
             h('button', { type: 'button', className: 'pp-btn pp-btn-danger', onClick: () => removeProvider(p.key), key: 'del' }, s.confirmKey === p.key ? '确认删除' : '删除'))))
       }
       if (data !== null) {
-        const imgRoutes = data.providers.filter((p) => p.image === true)
+        const imgRoutes = data.providers.filter((p) => p.image === true || (Array.isArray(p.imageModels) && p.imageModels.length > 0))
         if (imgRoutes.length > 0) {
           const cur = imgRoutes.find((p) => p.imageDefault === true)
           rows.push(h('div', { className: 'pp-defrow', key: 'imgdef' },

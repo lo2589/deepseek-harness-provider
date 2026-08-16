@@ -119,7 +119,66 @@ module.exports = {
       }
     }
 
+    // ---- 读图能力自动测试：给每个模型发 1px 测试图，能回 OK 的标记 image: true ----
+    const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    async function probeModel(key, raw, model, revision) {
+      if (raw === null || typeof raw !== 'object' || typeof raw.baseURL !== 'string' || !raw.baseURL) return
+      const api = raw.api === 'openai-responses' ? 'openai-responses' : 'openai-completions'
+      let apiKey
+      if (typeof raw.apiKeyEnv === 'string' && raw.apiKeyEnv && credentials !== undefined) {
+        try {
+          const resolved = await credentials.resolve(raw.apiKeyEnv)
+          if (resolved !== undefined) apiKey = resolved.value
+        } catch (e) { /* probe unauthenticated */ }
+      }
+      const url = raw.baseURL.replace(/\/+$/, '') + '/chat/completions'
+      const body = JSON.stringify({
+        model: model.id,
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: 'OK' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,' + PNG_1PX } },
+        ] }],
+        max_tokens: 1,
+      })
+      let ok = false
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: Object.assign({ 'content-type': 'application/json' }, apiKey === undefined ? {} : { authorization: 'Bearer ' + apiKey }),
+          body,
+        })
+        if (res.ok) {
+          const text = await res.text()
+          ok = text.indexOf('"choices"') >= 0
+        }
+      } catch (e) {
+        ok = false
+      }
+      if (!ok) return
+      // mark the model image-capable in config (raw section keeps the field)
+      try {
+        await settings.mutate(NS, [{ op: 'set', path: ['providers', key, 'models', model.index, 'image'], value: true }], revision)
+      } catch (e) { /* next cycle retries */ }
+    }
+    async function probeAll() {
+      if (settings === undefined || credentials === undefined) return
+      const snap = snapshot()
+      if (snap === undefined) return
+      for (const [key, raw] of Object.entries(snap.providers)) {
+        if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue
+        const models = Array.isArray(raw.models) ? raw.models : []
+        for (let i = 0; i < Math.min(models.length, 5); i++) {
+          const m = models[i]
+          if (m === null || typeof m !== 'object' || typeof m.id !== 'string') continue
+          if (m.image === true) continue
+          await probeModel(key, raw, { id: m.id, index: i }, snap.descriptor.revision)
+        }
+      }
+    }
+
     // 后台自动同步；ctx.setInterval 是 fiber 作用域定时器，插件卸载自动清理。
+    ctx.interval(() => { void probeAll() }, 600000)
+    void probeAll()
     ctx.interval(() => { void syncAll() }, 60000)
     void syncAll()
   },
