@@ -815,7 +815,7 @@ window.__ModuleLoader__.load({
               }
             }
             toast('截图已插入输入框')
-            // 2) 尽力而为：保存到工作区 .截图/（host 有 save-screenshot 路由才成功；失败不阻塞）
+            // 2) 尽力而为：保存到工作区 .screenshots/（host 有 save-screenshot 路由才成功；失败不阻塞）
             try {
               var reader = new FileReader()
               var dataBase64 = await new Promise(function (res, rej) {
@@ -846,7 +846,7 @@ window.__ModuleLoader__.load({
             setBusy(false)
           }
         }
-        return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框（顺带存入 .截图/）',
+        return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框（顺带存入 .screenshots/）',
           'aria-label': '截图', onClick: shoot },
           h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, 'aria-hidden': true },
             h('path', { d: 'M3 4.5h2l1-1.5h4l1 1.5h2a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V6A1.5 1.5 0 0 1 3 4.5Zm5 6.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z', fill: 'currentColor' })))

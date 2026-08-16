@@ -508,7 +508,7 @@ module.exports = {
         },
       })
       // 截图保存：POST ?session=<id>，body JSON { name, dataBase64 }
-      // 写到 <会话cwd>/.截图/<name>，返回 { path }；目录不存在则创建
+      // 写到 <会话cwd>/.screenshots/<name>，返回 { path }；目录不存在则创建
       const shotDisposer = server.register({
         kind: 'exact',
         path: '/plugins/provider-quick-config/save-screenshot',
@@ -544,7 +544,7 @@ module.exports = {
             }
             const nodeFs = require('node:fs')
             const nodePath = require('node:path')
-            const shotDir = nodePath.join(cwd, '.截图')
+            const shotDir = nodePath.join(cwd, '.screenshots')
             nodeFs.mkdirSync(shotDir, { recursive: true })
             const safe = name.replace(/[^\w.\-]/g, '_')
             const abs = nodePath.join(shotDir, safe)
