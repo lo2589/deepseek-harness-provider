@@ -691,13 +691,14 @@ window.__ModuleLoader__.load({
       }
 
       function ScreenshotButton(props) {
+        var s = useStore()
         var busyState = React.useState(false)
         var busy = busyState[0]
         var setBusy = busyState[1]
         async function shoot() {
           if (busy || typeof navigator === 'undefined' || navigator.mediaDevices === undefined
             || navigator.mediaDevices.getDisplayMedia === undefined) {
-            setState({ notice: '此浏览器不支持屏幕捕获' })
+            setState({ showcaseError: '此浏览器不支持屏幕捕获（需 HTTPS 或 localhost）' })
             return
           }
           setBusy(true)
@@ -718,21 +719,43 @@ window.__ModuleLoader__.load({
             canvas.height = video.videoHeight || 720
             canvas.getContext('2d').drawImage(video, 0, 0)
             var blob = await new Promise(function (res) { canvas.toBlob(res, 'image/png') })
-            if (blob === null) return
-            var file = new File([blob], 'screenshot.png', { type: 'image/png' })
-            var conversation = ctx.get('conversation')
-            if (conversation !== undefined && props.inputActions !== undefined) {
-              var images = conversation.createDraftImages([file])
-              if (images.length > 0 && !props.inputActions.addImages(images.map(function (i) { return i.id }))) {
-                conversation.releaseDraftImages(images)
-              }
+            if (blob === null) {
+              setState({ showcaseError: '截图失败：画布无法导出' })
+              return
             }
+            // 存到工作区 .截图/（默认进多媒体库，不自动插入正文）
+            var reader = new FileReader()
+            var dataBase64 = await new Promise(function (res, rej) {
+              reader.onload = function () { res(String(reader.result || '').split(',')[1] || '') }
+              reader.onerror = rej
+              reader.readAsDataURL(blob)
+            })
+            var ts = new Date()
+            function pad(n) { return n < 10 ? '0' + n : String(n) }
+            var stamp = ts.getFullYear() + pad(ts.getMonth() + 1) + pad(ts.getDate()) + '-' + pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds())
+            var res2 = await fetch(MEDIA_ROUTE + '/save-screenshot?session=' + encodeURIComponent(s.showcaseSession || ''), {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ name: 'screenshot-' + stamp + '.png', dataBase64: dataBase64 }),
+            })
+            var saved = await res2.json()
+            if (!res2.ok || saved.path === undefined) {
+              setState({ showcaseError: '截图保存失败：' + (saved.error || ('HTTP ' + res2.status)) })
+              return
+            }
+            // 路径写进输入框（用户决定发不发）；刷新展示台让它出现
+            var ia = store.showcaseInputActions
+            if (ia !== null && typeof ia.setDraft === 'function') ia.setDraft(saved.path)
+            setState({ showcaseError: null })
+            if (s.showcaseOpen) void loadShowcase(s.showcaseSession)
+          } catch (e) {
+            setState({ showcaseError: '截图失败：' + messageOf(e) })
           } finally {
             stream.getTracks().forEach(function (t) { t.stop() })
             setBusy(false)
           }
         }
-        return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框',
+        return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图 → 存入 .截图/ 并写入输入框路径',
           'aria-label': '截图', onClick: shoot },
           h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, 'aria-hidden': true },
             h('path', { d: 'M3 4.5h2l1-1.5h4l1 1.5h2a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V6A1.5 1.5 0 0 1 3 4.5Zm5 6.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z', fill: 'currentColor' })))

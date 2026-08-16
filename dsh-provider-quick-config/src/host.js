@@ -507,7 +507,58 @@ module.exports = {
           }
         },
       })
-      return () => { try { listDisposer() } catch (e) {} try { fileDisposer() } catch (e) {} }
+      // 截图保存：POST ?session=<id>，body JSON { name, dataBase64 }
+      // 写到 <会话cwd>/.截图/<name>，返回 { path }；目录不存在则创建
+      const shotDisposer = server.register({
+        kind: 'exact',
+        path: '/plugins/provider-quick-config/save-screenshot',
+        handler: async (req, res) => {
+          const q = queryOf(req.url)
+          const sid = q.session || ''
+          let bodyStr = ''
+          try {
+            for await (const chunk of req) bodyStr += chunk
+          } catch (e) { /* empty body */ }
+          let parsed = null
+          try { parsed = JSON.parse(bodyStr) } catch (e) { parsed = null }
+          const name = parsed !== null && typeof parsed.name === 'string' ? parsed.name : ''
+          const dataBase64 = parsed !== null && typeof parsed.dataBase64 === 'string' ? parsed.dataBase64 : ''
+          if (sid === '' || name === '' || dataBase64 === '') {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'missing session/name/data' }))
+            return
+          }
+          try {
+            // 查会话 cwd
+            let cwd = undefined
+            const sq = ctx.get('sessionQuery')
+            if (sq !== undefined && typeof sq.readSession === 'function') {
+              const snap = await sq.readSession(sid)
+              if (snap !== undefined && snap !== null && snap.session !== undefined && snap.session !== null
+                && typeof snap.session.cwd === 'string') cwd = snap.session.cwd
+            }
+            if (cwd === undefined) {
+              res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' })
+              res.end(JSON.stringify({ error: 'session cwd unknown' }))
+              return
+            }
+            const nodeFs = require('node:fs')
+            const nodePath = require('node:path')
+            const shotDir = nodePath.join(cwd, '.截图')
+            nodeFs.mkdirSync(shotDir, { recursive: true })
+            const safe = name.replace(/[^\w.\-]/g, '_')
+            const abs = nodePath.join(shotDir, safe)
+            const buf = Buffer.from(dataBase64, 'base64')
+            nodeFs.writeFileSync(abs, buf)
+            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ path: abs, name: safe }))
+          } catch (e) {
+            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: String((e && e.message) || e) }))
+          }
+        },
+      })
+      return () => { try { listDisposer() } catch (e) {} try { fileDisposer() } catch (e) {} try { shotDisposer() } catch (e) {} }
     }
 
     // 后台自动同步；ctx.setInterval 是 fiber 作用域定时器，插件卸载自动清理。
