@@ -820,20 +820,16 @@ window.__ModuleLoader__.load({
             }
             return
           }
+          // 选区截图：全屏预览 + 拖拽框选，确定后只截选中的区域
+          var cropped = await selectRegion(stream)
+          if (cropped === null) {
+            // 用户取消
+            stream.getTracks().forEach(function (t) { t.stop() })
+            setBusy(false)
+            return
+          }
           try {
-            var video = document.createElement('video')
-            video.srcObject = stream
-            video.muted = true
-            await new Promise(function (res) { video.onloadedmetadata = function () { video.play().then(res, res) } })
-            var canvas = document.createElement('canvas')
-            canvas.width = video.videoWidth || 1280
-            canvas.height = video.videoHeight || 720
-            canvas.getContext('2d').drawImage(video, 0, 0)
-            var blob = await new Promise(function (res) { canvas.toBlob(res, 'image/png') })
-            if (blob === null) {
-              toast('截图失败：画布无法导出')
-              return
-            }
+            var blob = cropped.blob
             // 1) 立即插入附件到输入框（原行为，纯浏览器端，不依赖 host）
             var file = new File([blob], 'screenshot-' + Date.now() + '.png', { type: 'image/png' })
             var conversation = ctx.get('conversation')
@@ -877,6 +873,132 @@ window.__ModuleLoader__.load({
             stream.getTracks().forEach(function (t) { t.stop() })
             setBusy(false)
           }
+        }
+        // 选区截图：显示全屏预览，用户拖拽框选区域，返回裁剪后的 { blob }；取消返回 null
+        function selectRegion(stream) {
+          return new Promise(function (resolve) {
+            var video = document.createElement('video')
+            video.srcObject = stream
+            video.muted = true
+            video.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;'
+            var overlay = document.createElement('div')
+            overlay.id = 'pp-crop-overlay'
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:9997;cursor:crosshair;'
+            overlay.appendChild(video)
+            var sel = document.createElement('div')
+            sel.style.cssText = 'position:absolute;border:2px solid #4f8cff;background:rgba(79,140,255,.15);display:none;pointer-events:none;'
+            overlay.appendChild(sel)
+            var bar = document.createElement('div')
+            bar.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:10px;background:rgba(0,0,0,.7);border-radius:10px;padding:8px 14px;z-index:10;'
+            var btnOk = document.createElement('button')
+            btnOk.textContent = '确定 (Enter)'
+            btnOk.style.cssText = 'border:none;background:#4f8cff;color:#fff;border-radius:8px;padding:6px 16px;font-size:13px;cursor:pointer;font-weight:600;'
+            var btnCancel = document.createElement('button')
+            btnCancel.textContent = '取消 (Esc)'
+            btnCancel.style.cssText = 'border:1px solid #888;background:transparent;color:#eee;border-radius:8px;padding:6px 16px;font-size:13px;cursor:pointer;'
+            bar.appendChild(btnOk)
+            bar.appendChild(btnCancel)
+            overlay.appendChild(bar)
+            document.body.appendChild(overlay)
+            var rect = null
+            var dragging = false
+            var startX = 0
+            var startY = 0
+            function videoRect() {
+              var vw = video.videoWidth || 1280
+              var vh = video.videoHeight || 720
+              var scale = Math.min(window.innerWidth / vw, window.innerHeight / vh)
+              var dw = vw * scale
+              var dh = vh * scale
+              var left = (window.innerWidth - dw) / 2
+              var top = (window.innerHeight - dh) / 2
+              return { left: left, top: top, width: dw, height: dh, scale: scale, vw: vw, vh: vh }
+            }
+            function onDown(e) {
+              // 点按钮/取消条不算拖拽
+              if (e.target !== video && e.target !== overlay) return
+              var vr = videoRect()
+              if (vr.vw <= 0 || vr.vh <= 0) return
+              if (e.clientX < vr.left || e.clientX > vr.left + vr.width
+                || e.clientY < vr.top || e.clientY > vr.top + vr.height) return
+              dragging = true
+              startX = e.clientX
+              startY = e.clientY
+              sel.style.display = 'block'
+              sel.style.left = startX + 'px'
+              sel.style.top = startY + 'px'
+              sel.style.width = '0px'
+              sel.style.height = '0px'
+              e.preventDefault()
+            }
+            function onMove(e) {
+              if (!dragging) return
+              var x = Math.min(e.clientX, startX)
+              var y = Math.min(e.clientY, startY)
+              var w = Math.abs(e.clientX - startX)
+              var h = Math.abs(e.clientY - startY)
+              sel.style.left = x + 'px'
+              sel.style.top = y + 'px'
+              sel.style.width = w + 'px'
+              sel.style.height = h + 'px'
+            }
+            function onUp(e) {
+              if (!dragging) return
+              dragging = false
+              var x = Math.min(e.clientX, startX)
+              var y = Math.min(e.clientY, startY)
+              var w = Math.abs(e.clientX - startX)
+              var h = Math.abs(e.clientY - startY)
+              rect = { x: x, y: y, w: w, h: h }
+            }
+            function cleanup() {
+              if (overlay.parentNode !== null) overlay.parentNode.removeChild(overlay)
+              document.removeEventListener('mousemove', onMove)
+              document.removeEventListener('mouseup', onUp)
+              document.removeEventListener('keydown', onKey)
+              try { video.pause() } catch (e2) {}
+            }
+            function onKey(e) {
+              if (e.key === 'Escape') {
+                cleanup()
+                resolve(null)
+              } else if (e.key === 'Enter') {
+                doCrop()
+              }
+            }
+            function doCrop() {
+              if (rect === null || rect.w < 4 || rect.h < 4) {
+                toast('请先在画面上拖拽框选截图区域')
+                return
+              }
+              var vr = videoRect()
+              var canvas = document.createElement('canvas')
+              var sx = (rect.x - vr.left) / vr.scale
+              var sy = (rect.y - vr.top) / vr.scale
+              var sw = rect.w / vr.scale
+              var sh = rect.h / vr.scale
+              // 夹在视频真实边界内
+              sx = Math.max(0, Math.min(sx, vr.vw))
+              sy = Math.max(0, Math.min(sy, vr.vh))
+              sw = Math.min(sw, vr.vw - sx)
+              sh = Math.min(sh, vr.vh - sy)
+              canvas.width = Math.max(1, Math.round(sw))
+              canvas.height = Math.max(1, Math.round(sh))
+              canvas.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
+              canvas.toBlob(function (blob) {
+                cleanup()
+                if (blob === null) { toast('截图失败：画布无法导出'); resolve(null); return }
+                resolve({ blob: blob })
+              }, 'image/png')
+            }
+            overlay.addEventListener('mousedown', onDown)
+            document.addEventListener('mousemove', onMove)
+            document.addEventListener('mouseup', onUp)
+            document.addEventListener('keydown', onKey)
+            btnOk.addEventListener('click', doCrop)
+            btnCancel.addEventListener('click', function () { cleanup(); resolve(null) })
+            video.play().catch(function () { /* preview best-effort */ })
+          })
         }
         return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框（顺带存入 .screenshots/）',
           'aria-label': '截图', onClick: shoot },
