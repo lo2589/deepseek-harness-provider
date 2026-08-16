@@ -215,7 +215,7 @@ window.__ModuleLoader__.load({
 
       // 样式注入（卸载时移除）
       var styleEl = document.createElement('style')
-      styleEl.textContent = '.pp-plus{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;}.pp-plus:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}.pp-panel{position:absolute;right:0;bottom:calc(100% + 8px);z-index:100;width:min(440px,calc(100vw - 48px));max-height:min(66vh,600px);display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);padding:10px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);overflow:hidden;}.pp-head{display:flex;align-items:center;justify-content:space-between;padding:2px 2px 8px;flex:none;}.pp-title{font-weight:600;font-size:14px;}.pp-close{border:none;background:transparent;color:var(--dsw-alias-label-secondary);font-size:18px;cursor:pointer;line-height:1;padding:2px 8px;border-radius:6px;}.pp-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}.pp-body{overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:0;}.pp-form{gap:8px;}.pp-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;flex:none;}.pp-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;}.pp-row-title{display:flex;align-items:center;gap:6px;}.pp-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-secondary);flex:none;}.pp-dot-ok{background:var(--dsw-alias-state-success-primary);}.pp-dot-no{background:var(--dsw-alias-state-warn-primary);}.pp-name{font-weight:600;}.pp-key{color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;}.pp-badge{font-size:11px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);}.pp-badge-custom{color:var(--dsw-alias-brand-primary);}.pp-row-sub{display:flex;gap:8px;color:var(--dsw-alias-label-secondary);font-size:12px;flex-wrap:wrap;}.pp-env{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}.pp-models{font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;}.pp-row-actions{display:flex;gap:6px;flex:none;}.pp-btn{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;}.pp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-btn-danger{color:var(--dsw-alias-state-error-primary);}.pp-btn-primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);font-weight:600;}.pp-btn:disabled{opacity:.5;cursor:default;}.pp-add{margin-top:4px;border:1px dashed var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-brand-primary);border-radius:10px;padding:8px;cursor:pointer;font-size:13px;flex:none;}.pp-add:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-hint{color:var(--dsw-alias-label-secondary);font-size:12px;}.pp-err{color:var(--dsw-alias-state-error-primary);font-size:12px;margin-top:6px;white-space:pre-wrap;word-break:break-word;flex:none;}.pp-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;margin-top:6px;flex:none;}.pp-status{color:var(--dsw-alias-label-secondary);font-size:12px;margin-top:6px;flex:none;}.pp-foot{color:var(--dsw-alias-label-secondary);font-size:11px;margin-top:4px;flex:none;}.pp-field{display:flex;flex-direction:column;gap:4px;flex:none;}.pp-label{font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-label2{font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-input{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);border-radius:8px;padding:6px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;}.pp-input:focus{border-color:var(--dsw-alias-brand-primary);}.pp-input:disabled{opacity:.6;}.pp-actions{display:flex;gap:8px;margin-top:2px;flex:none;flex-wrap:wrap;}.pp-check{display:flex;gap:6px;align-items:center;color:var(--dsw-alias-label-primary);cursor:pointer;font-size:12px;}.pp-picker-head{display:flex;align-items:center;gap:8px;padding-bottom:6px;flex:none;}.pp-title2{font-weight:600;}.pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}.pp-tpl{display:flex;flex-direction:column;gap:2px;text-align:left;border:1px solid var(--dsw-alias-border-l1);background:transparent;border-radius:10px;padding:8px 10px;cursor:pointer;color:var(--dsw-alias-label-primary);}.pp-tpl:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-tpl-name{font-weight:600;font-size:13px;}.pp-tpl-key{font-size:11px;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.pp-tpl-custom{border-style:dashed;}.pp-chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;}.pp-chip{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);border-radius:999px;padding:2px 8px;font-size:11px;cursor:pointer;}.pp-chip:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-chip-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-interactive-bg-hover);}.pp-search{margin-bottom:2px;flex:none;}.pp-mlist{display:flex;flex-direction:column;gap:4px;}.hs-wrap{position:relative;flex:none;}.hs-input{width:150px;padding:4px 8px;font-size:12px;}.hs-drop{position:absolute;top:calc(100% + 4px);right:0;z-index:120;min-width:280px;max-width:360px;max-height:320px;overflow-y:auto;display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-inverted);border-radius:10px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);padding:4px;}.hs-item{border:none;background:transparent;text-align:left;border-radius:8px;padding:6px 8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary);cursor:pointer;white-space:normal;}.hs-item:hover{background:var(--dsw-alias-interactive-bg-hover);}.hs-snippet{display:block;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}.hs-empty{padding:6px 8px;font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-mrow{display:flex;gap:4px;align-items:center;}.pp-mid{flex:1 1 auto;}.pp-mnum{flex:0 0 74px;}.pp-mdel{flex:none;}'
+      styleEl.textContent = '.pp-plus{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;}.pp-plus:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}.pp-panel{position:absolute;right:0;bottom:calc(100% + 8px);z-index:100;width:min(440px,calc(100vw - 48px));max-height:min(66vh,600px);display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);padding:10px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);overflow:hidden;}.pp-head{display:flex;align-items:center;justify-content:space-between;padding:2px 2px 8px;flex:none;}.pp-title{font-weight:600;font-size:14px;}.pp-close{border:none;background:transparent;color:var(--dsw-alias-label-secondary);font-size:18px;cursor:pointer;line-height:1;padding:2px 8px;border-radius:6px;}.pp-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}.pp-body{overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:0;}.pp-form{gap:8px;}.pp-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;flex:none;}.pp-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;}.pp-row-title{display:flex;align-items:center;gap:6px;}.pp-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-secondary);flex:none;}.pp-dot-ok{background:var(--dsw-alias-state-success-primary);}.pp-dot-no{background:var(--dsw-alias-state-warn-primary);}.pp-name{font-weight:600;}.pp-key{color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;}.pp-badge{font-size:11px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);}.pp-badge-custom{color:var(--dsw-alias-brand-primary);}.pp-row-sub{display:flex;gap:8px;color:var(--dsw-alias-label-secondary);font-size:12px;flex-wrap:wrap;}.pp-env{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}.pp-models{font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;}.pp-row-actions{display:flex;gap:6px;flex:none;}.pp-btn{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;}.pp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-btn-danger{color:var(--dsw-alias-state-error-primary);}.pp-btn-primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);font-weight:600;}.pp-btn:disabled{opacity:.5;cursor:default;}.pp-add{margin-top:4px;border:1px dashed var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-brand-primary);border-radius:10px;padding:8px;cursor:pointer;font-size:13px;flex:none;}.pp-add:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-hint{color:var(--dsw-alias-label-secondary);font-size:12px;}.pp-err{color:var(--dsw-alias-state-error-primary);font-size:12px;margin-top:6px;white-space:pre-wrap;word-break:break-word;flex:none;}.pp-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;margin-top:6px;flex:none;}.pp-status{color:var(--dsw-alias-label-secondary);font-size:12px;margin-top:6px;flex:none;}.pp-foot{color:var(--dsw-alias-label-secondary);font-size:11px;margin-top:4px;flex:none;}.pp-field{display:flex;flex-direction:column;gap:4px;flex:none;}.pp-label{font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-label2{font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-input{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);border-radius:8px;padding:6px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;}.pp-input:focus{border-color:var(--dsw-alias-brand-primary);}.pp-input:disabled{opacity:.6;}.pp-actions{display:flex;gap:8px;margin-top:2px;flex:none;flex-wrap:wrap;}.pp-check{display:flex;gap:6px;align-items:center;color:var(--dsw-alias-label-primary);cursor:pointer;font-size:12px;}.pp-picker-head{display:flex;align-items:center;gap:8px;padding-bottom:6px;flex:none;}.pp-title2{font-weight:600;}.pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}.pp-tpl{display:flex;flex-direction:column;gap:2px;text-align:left;border:1px solid var(--dsw-alias-border-l1);background:transparent;border-radius:10px;padding:8px 10px;cursor:pointer;color:var(--dsw-alias-label-primary);}.pp-tpl:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-tpl-name{font-weight:600;font-size:13px;}.pp-tpl-key{font-size:11px;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.pp-tpl-custom{border-style:dashed;}.pp-chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;}.pp-chip{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);border-radius:999px;padding:2px 8px;font-size:11px;cursor:pointer;}.pp-chip:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-chip-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-interactive-bg-hover);}.pp-search{margin-bottom:2px;flex:none;}.pp-shot-busy{opacity:.5;}.pp-defrow{display:flex;align-items:center;gap:6px;flex:none;}.pp-defsel{flex:1 1 auto;width:auto;padding:4px 8px;font-size:12px;}.pp-mlist{display:flex;flex-direction:column;gap:4px;}.hs-wrap{position:relative;flex:none;}.hs-input{width:150px;padding:4px 8px;font-size:12px;}.hs-drop{position:absolute;top:calc(100% + 4px);right:0;z-index:120;min-width:280px;max-width:360px;max-height:320px;overflow-y:auto;display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-inverted);border-radius:10px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);padding:4px;}.hs-item{border:none;background:transparent;text-align:left;border-radius:8px;padding:6px 8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary);cursor:pointer;white-space:normal;}.hs-item:hover{background:var(--dsw-alias-interactive-bg-hover);}.hs-snippet{display:block;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}.hs-empty{padding:6px 8px;font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-mrow{display:flex;gap:4px;align-items:center;}.pp-mid{flex:1 1 auto;}.pp-mnum{flex:0 0 74px;}.pp-mdel{flex:none;}'
       // ctx.effect's argument is the effect BODY, run immediately, and the
       // disposer is what that body RETURNS. Appending outside and handing the
       // removal in as the body made the style element append and then vanish on
@@ -446,6 +446,21 @@ window.__ModuleLoader__.load({
         await callWithRetry(saveProviderWire, args)
       }
 
+      function setImageDefault(key) {
+        if (store.data === null) return
+        var ops = store.data.providers.filter(function (p) { return p.image === true }).map(function (p) {
+          return { op: 'set', path: ['providers', p.key, 'imageDefault'], value: p.key === key }
+        })
+        setState({ busy: true, error: null })
+        saveProviderWire(api, { ops: ops }).then(function () {
+          return refresh()
+        }).then(function () {
+          setState({ busy: false, notice: '图片默认路由已设为 ' + key + '（带图发送时自动切换）' })
+        }).catch(function (e) {
+          setState({ busy: false, error: messageOf(e) })
+        })
+      }
+
       async function save() {
         var s = store
         var d = s.draft
@@ -572,7 +587,74 @@ window.__ModuleLoader__.load({
             : null)
       }
 
-      function PlusButton() {
+      function ScreenshotButton(props) {
+        var busyState = React.useState(false)
+        var busy = busyState[0]
+        var setBusy = busyState[1]
+        async function shoot() {
+          if (busy || typeof navigator === 'undefined' || navigator.mediaDevices === undefined
+            || navigator.mediaDevices.getDisplayMedia === undefined) {
+            setState({ notice: '此浏览器不支持屏幕捕获' })
+            return
+          }
+          setBusy(true)
+          var stream
+          try {
+            stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+          } catch (e) {
+            setBusy(false)
+            return
+          }
+          try {
+            var video = document.createElement('video')
+            video.srcObject = stream
+            video.muted = true
+            await new Promise(function (res) { video.onloadedmetadata = function () { video.play().then(res, res) } })
+            var canvas = document.createElement('canvas')
+            canvas.width = video.videoWidth || 1280
+            canvas.height = video.videoHeight || 720
+            canvas.getContext('2d').drawImage(video, 0, 0)
+            var blob = await new Promise(function (res) { canvas.toBlob(res, 'image/png') })
+            if (blob === null) return
+            var file = new File([blob], 'screenshot.png', { type: 'image/png' })
+            var conversation = ctx.get('conversation')
+            if (conversation !== undefined && props.inputActions !== undefined) {
+              var images = conversation.createDraftImages([file])
+              if (images.length > 0 && !props.inputActions.addImages(images.map(function (i) { return i.id }))) {
+                conversation.releaseDraftImages(images)
+              }
+            }
+          } finally {
+            stream.getTracks().forEach(function (t) { t.stop() })
+            setBusy(false)
+          }
+        }
+        return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框',
+          'aria-label': '截图', onClick: shoot },
+          h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, 'aria-hidden': true },
+            h('path', { d: 'M3 4.5h2l1-1.5h4l1 1.5h2a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V6A1.5 1.5 0 0 1 3 4.5Zm5 6.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z', fill: 'currentColor' })))
+      }
+
+      function PlusButton(props) {
+        var sessions = ctx.get('sessions')
+        var switchedRef = React.useRef(null)
+        var imageIds = props.useInput !== undefined ? props.useInput(function (st) { return st ? st.imageIds : [] }) : []
+        React.useEffect(function () {
+          if (imageIds.length === 0 || sessions === undefined || store.data === null) return
+          var imageRoutes = store.data.providers.filter(function (p) { return p.image === true })
+          var def = imageRoutes.find(function (p) { return p.imageDefault === true }) || imageRoutes[0]
+          if (def === undefined || switchedRef.current === props.sessionId) return
+          sessions.models({ sessionId: props.sessionId }).then(function (res) {
+            if (!res.result.ok) return
+            var cur = res.result.value.current
+            if (cur === null || cur === undefined) return
+            if (imageRoutes.some(function (p) { return p.key === cur.provider }) || cur.provider === def.key) return
+            var model = Array.isArray(def.models) && def.models.length > 0 ? def.models[0].id : undefined
+            if (model === undefined) return
+            switchedRef.current = props.sessionId
+            sessions.selectModel({ sessionId: props.sessionId, provider: def.key, model: model })
+          })
+        }, [imageIds.length, props.sessionId, store.data])
         useStore()
         return h('button', {
           type: 'button', className: 'pp-plus', 'aria-label': '配置 Provider',
@@ -631,6 +713,16 @@ window.__ModuleLoader__.load({
               h('button', { type: 'button', className: 'pp-btn pp-btn-danger', onClick: () => removeProvider(p.key), key: 'del' }, s.confirmKey === p.key ? '确认删除' : '删除'))))
         }
         if (q !== '' && shown === 0) {
+          if (data !== null) {
+            var imgRoutes = data.providers.filter(function (p) { return p.image === true })
+            if (imgRoutes.length > 0) {
+              var cur = imgRoutes.find(function (p) { return p.imageDefault === true })
+              rows.push(h('div', { className: 'pp-defrow', key: 'imgdef' },
+                h('span', { className: 'pp-label2' }, '图片默认路由:'),
+                h('select', { className: 'pp-input pp-defsel', value: cur ? cur.key : '', onChange: function (e) { setImageDefault(e.target.value) } },
+                  imgRoutes.map(function (p) { return h('option', { value: p.key, key: p.key }, p.displayName || p.key) }))))
+            }
+          }
           rows.push(h('div', { className: 'pp-hint', key: 'no-match' }, '没有匹配的厂商或模型'))
         }
                 rows.push(h('button', { type: 'button', className: 'pp-add', key: 'add', onClick: () => setState({ view: 'picker' }) }, '+ 添加 Provider'))
@@ -741,8 +833,12 @@ window.__ModuleLoader__.load({
         () => React.createElement(HistorySearch),
       ))
       slots.inject('conversation.input.right', () => slots.register(
+        { name: 'conversation.input.right', id: 'screenshot-btn', order: -1 },
+        (props) => React.createElement(ScreenshotButton, props),
+      ))
+      slots.inject('conversation.input.right', () => slots.register(
         { name: 'conversation.input.right', id: 'provider-plus', order: 0 },
-        () => React.createElement(PlusButton),
+        (props) => React.createElement(PlusButton, props),
       ))
       slots.inject('conversation.input.overlay', () => slots.register(
         { name: 'conversation.input.overlay', id: 'provider-panel', order: 2 },

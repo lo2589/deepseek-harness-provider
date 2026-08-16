@@ -114,6 +114,8 @@ return {
               : undefined,
             models,
             syncModels: raw.syncModels === true,
+            image: raw.image === true,
+            imageDefault: raw.imageDefault === true,
             catalog: catalogKeys.has(key) && !hasOwnEndpoint,
             credential: await credentialOf(ref),
           }))
@@ -254,13 +256,14 @@ return {
       const credentials = credentialsOf()
       if (settings === undefined) throw new Error('settings 服务不可用')
       const ops = Array.isArray(a.ops) ? a.ops : []
-      if (ops.length !== 1 || ops[0] === null || typeof ops[0] !== 'object'
-        || ops[0].op !== 'set' || !Array.isArray(ops[0].path) || ops[0].value === undefined) {
-        throw new Error('providers.save: 需要一条 set op（{ op: "set", path, value }）')
+      if (ops.length === 0 || ops.some((op) => op === null || typeof op !== 'object'
+        || (op.op !== 'set' && op.op !== 'unset') || !Array.isArray(op.path))) {
+        throw new Error('providers.save: 需要至少一条 { op: "set"|"unset", path } op')
       }
       const revision = typeof a.revision === 'number' ? a.revision : undefined
       await settings.mutate(NS, ops, revision)
-      const profile = ops[0].value
+      const setOp = ops.find((op) => op.op === 'set' && op.value !== undefined)
+      const profile = setOp !== undefined ? setOp.value : {}
       const apiKey = typeof a.apiKey === 'string' ? a.apiKey : ''
       const ref = profile !== null && typeof profile === 'object' && typeof profile.apiKeyEnv === 'string' ? profile.apiKeyEnv : undefined
       if (apiKey !== '' && ref !== undefined) {

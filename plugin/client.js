@@ -267,6 +267,7 @@ return {
           baseURL: custom ? (template !== undefined && template.baseURL ? template.baseURL : '') : '',
           thinkingFormat: custom ? (template !== undefined && template.thinkingFormat ? template.thinkingFormat : '') : '',
           syncModels: !!(template !== undefined && template.syncModels),
+          image: !!(template !== undefined && template.image),
           models: hasModels
             ? toEditable(template.models)
             : (template !== undefined && template.local ? [] : [{ id: '', name: '', contextWindow: '', maxTokens: '' }]),
@@ -293,6 +294,7 @@ return {
           baseURL: provider.baseURL || '',
           thinkingFormat: (provider.compat && provider.compat.thinkingFormat) || '',
           syncModels: provider.syncModels === true,
+          image: provider.image === true,
           models: toEditable(provider.models),
         },
         error: null,
@@ -342,6 +344,21 @@ return {
     }
     const saveWithRetry = (args) => callWithRetry('providers.save', args)
 
+    const setImageDefault = async (key) => {
+      if (store.data === null) return
+      const ops = store.data.providers
+        .filter((p) => p.image === true)
+        .map((p) => ({ op: 'set', path: ['providers', p.key, 'imageDefault'], value: p.key === key }))
+      setState({ busy: true, error: null })
+      try {
+        await host.call('providers.save', jsonArgs({ ops }))
+        await refresh()
+        setState({ busy: false, notice: '图片默认路由已设为 ' + key + '（带图发送时自动切换）' })
+      } catch (e) {
+        setState({ busy: false, error: messageOf(e) })
+      }
+    }
+
     const save = async () => {
       const s = store
       const d = s.draft
@@ -376,6 +393,7 @@ return {
         profile.baseURL = d.baseURL.trim()
         if (d.thinkingFormat) profile.compat = { thinkingFormat: d.thinkingFormat }
         if (d.syncModels) profile.syncModels = true
+        if (d.image) profile.image = true
         const cleaned = []
         for (const m of (d.models || [])) {
           const id = typeof m.id === 'string' ? m.id.trim() : ''
@@ -490,8 +508,75 @@ return {
           : null)
     }
 
-    const PlusButton = () => {
+    const ScreenshotButton = (props) => {
+      const [busy, setBusy] = React.useState(false)
+      const shoot = async () => {
+        if (busy || typeof navigator === 'undefined' || navigator.mediaDevices === undefined
+          || navigator.mediaDevices.getDisplayMedia === undefined) {
+          setState({ notice: '此浏览器不支持屏幕捕获' })
+          return
+        }
+        setBusy(true)
+        let stream
+        try {
+          stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+        } catch (e) {
+          setBusy(false)
+          return
+        }
+        try {
+          const video = document.createElement('video')
+          video.srcObject = stream
+          video.muted = true
+          await new Promise((res) => { video.onloadedmetadata = () => { video.play().then(res, res) } })
+          const canvas = document.createElement('canvas')
+          canvas.width = video.videoWidth || 1280
+          canvas.height = video.videoHeight || 720
+          canvas.getContext('2d').drawImage(video, 0, 0)
+          const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'))
+          if (blob === null) return
+          const file = new File([blob], 'screenshot.png', { type: 'image/png' })
+          const conversation = ctx.get('conversation')
+          if (conversation !== undefined && props.inputActions !== undefined) {
+            const images = conversation.createDraftImages([file])
+            if (images.length > 0 && !props.inputActions.addImages(images.map((i) => i.id))) {
+              conversation.releaseDraftImages(images)
+            }
+          }
+        } finally {
+          stream.getTracks().forEach((t) => t.stop())
+          setBusy(false)
+        }
+      }
+      return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框',
+        'aria-label': '截图', onClick: shoot },
+        h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, 'aria-hidden': true },
+          h('path', { d: 'M3 4.5h2l1-1.5h4l1 1.5h2a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V6A1.5 1.5 0 0 1 3 4.5Zm5 6.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z', fill: 'currentColor' })))
+    }
+
+    const PlusButton = (props) => {
       const s = useStore()
+      const inputActions = props.inputActions
+      const sessionId = props.sessionId
+      const imageIds = props.useInput !== undefined ? props.useInput((st) => (st ? st.imageIds : [])) : []
+      const sessions = ctx.get('sessions')
+      const switchedRef = React.useRef(null)
+      React.useEffect(() => {
+        if (imageIds.length === 0 || sessions === undefined || s.data === null) return
+        const imageRoutes = s.data.providers.filter((p) => p.image === true)
+        const def = imageRoutes.find((p) => p.imageDefault === true) || imageRoutes[0]
+        if (def === undefined || switchedRef.current === sessionId) return
+        sessions.models({ sessionId }).then((res) => {
+          if (!res.result.ok) return
+          const cur = res.result.value.current
+          if (cur === null || cur === undefined) return
+          if (imageRoutes.some((p) => p.key === cur.provider) || cur.provider === def.key) return
+          const model = Array.isArray(def.models) && def.models.length > 0 ? def.models[0].id : undefined
+          if (model === undefined) return
+          switchedRef.current = sessionId
+          sessions.selectModel({ sessionId, provider: def.key, model })
+        })
+      }, [imageIds.length, sessionId, s.data])
       return h('button', {
         type: 'button',
         className: 'pp-plus',
@@ -548,6 +633,16 @@ return {
           h('div', { className: 'pp-row-actions' },
             h('button', { type: 'button', className: 'pp-btn', onClick: () => startEdit(p), key: 'edit' }, '编辑'),
             h('button', { type: 'button', className: 'pp-btn pp-btn-danger', onClick: () => removeProvider(p.key), key: 'del' }, s.confirmKey === p.key ? '确认删除' : '删除'))))
+      }
+      if (data !== null) {
+        const imgRoutes = data.providers.filter((p) => p.image === true)
+        if (imgRoutes.length > 0) {
+          const cur = imgRoutes.find((p) => p.imageDefault === true)
+          rows.push(h('div', { className: 'pp-defrow', key: 'imgdef' },
+            h('span', { className: 'pp-label2' }, '图片默认路由:'),
+            h('select', { className: 'pp-input pp-defsel', value: cur ? cur.key : '', onChange: (e) => setImageDefault(e.target.value) },
+              imgRoutes.map((p) => h('option', { value: p.key, key: p.key }, p.displayName || p.key)))))
+        }
       }
       if (q !== '' && shown === 0) {
         rows.push(h('div', { className: 'pp-hint', key: 'no-match' }, '没有匹配的厂商或模型'))
@@ -612,6 +707,10 @@ return {
           h('label', { className: 'pp-check' },
             h('input', { type: 'checkbox', checked: d.syncModels === true, onChange: (e) => setDraft({ syncModels: e.target.checked }) }),
             h('span', null, '端点模型列表变化时自动更新本路由的模型（后台每 60s 检查，端点为准）'))))
+        inputs.push(section('图片能力',
+          h('label', { className: 'pp-check' },
+            h('input', { type: 'checkbox', checked: d.image === true, onChange: (e) => setDraft({ image: e.target.checked }) }),
+            h('span', null, '该路由的模型支持图片输入（可作“图片默认路由”的候选）'))))
         const chipRow = known.length > 0
           ? h('div', { className: 'pp-chips', key: 'chips' },
             h('span', { className: 'pp-label2' }, '快捷模型：'),
@@ -654,15 +753,19 @@ return {
         s.notice ? h('div', { className: 'pp-ok' }, String(s.notice)) : null)
     }
 
-    styles.insert('.pp-plus{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;}.pp-plus:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}.pp-panel{position:absolute;right:0;bottom:calc(100% + 8px);z-index:100;width:min(440px,calc(100vw - 48px));max-height:min(66vh,600px);display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);padding:10px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);overflow:hidden;}.pp-head{display:flex;align-items:center;justify-content:space-between;padding:2px 2px 8px;flex:none;}.pp-title{font-weight:600;font-size:14px;}.pp-close{border:none;background:transparent;color:var(--dsw-alias-label-secondary);font-size:18px;cursor:pointer;line-height:1;padding:2px 8px;border-radius:6px;}.pp-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}.pp-body{overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:0;}.pp-form{gap:8px;}.pp-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;flex:none;}.pp-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;}.pp-row-title{display:flex;align-items:center;gap:6px;}.pp-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-secondary);flex:none;}.pp-dot-ok{background:var(--dsw-alias-state-success-primary);}.pp-dot-no{background:var(--dsw-alias-state-warn-primary);}.pp-name{font-weight:600;}.pp-key{color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;}.pp-badge{font-size:11px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);}.pp-badge-custom{color:var(--dsw-alias-brand-primary);}.pp-row-sub{display:flex;gap:8px;color:var(--dsw-alias-label-secondary);font-size:12px;flex-wrap:wrap;}.pp-env{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}.pp-models{font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;}.pp-row-actions{display:flex;gap:6px;flex:none;}.pp-btn{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;}.pp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-btn-danger{color:var(--dsw-alias-state-error-primary);}.pp-btn-primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);font-weight:600;}.pp-btn:disabled{opacity:.5;cursor:default;}.pp-add{margin-top:4px;border:1px dashed var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-brand-primary);border-radius:10px;padding:8px;cursor:pointer;font-size:13px;flex:none;}.pp-add:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-hint{color:var(--dsw-alias-label-secondary);font-size:12px;}.pp-err{color:var(--dsw-alias-state-error-primary);font-size:12px;margin-top:6px;white-space:pre-wrap;word-break:break-word;flex:none;}.pp-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;margin-top:6px;flex:none;}.pp-status{color:var(--dsw-alias-label-secondary);font-size:12px;margin-top:6px;flex:none;}.pp-foot{color:var(--dsw-alias-label-secondary);font-size:11px;margin-top:4px;flex:none;}.pp-field{display:flex;flex-direction:column;gap:4px;flex:none;}.pp-label{font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-label2{font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-input{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);border-radius:8px;padding:6px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;}.pp-input:focus{border-color:var(--dsw-alias-brand-primary);}.pp-input:disabled{opacity:.6;}.pp-actions{display:flex;gap:8px;margin-top:2px;flex:none;flex-wrap:wrap;}.pp-check{display:flex;gap:6px;align-items:center;color:var(--dsw-alias-label-primary);cursor:pointer;font-size:12px;}.pp-picker-head{display:flex;align-items:center;gap:8px;padding-bottom:6px;flex:none;}.pp-title2{font-weight:600;}.pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}.pp-tpl{display:flex;flex-direction:column;gap:2px;text-align:left;border:1px solid var(--dsw-alias-border-l1);background:transparent;border-radius:10px;padding:8px 10px;cursor:pointer;color:var(--dsw-alias-label-primary);}.pp-tpl:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-tpl-name{font-weight:600;font-size:13px;}.pp-tpl-key{font-size:11px;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.pp-tpl-custom{border-style:dashed;}.pp-chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;}.pp-chip{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);border-radius:999px;padding:2px 8px;font-size:11px;cursor:pointer;}.pp-chip:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-chip-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-interactive-bg-hover);}.pp-search{margin-bottom:2px;flex:none;}.pp-mlist{display:flex;flex-direction:column;gap:4px;}.hs-wrap{position:relative;flex:none;}.hs-input{width:150px;padding:4px 8px;font-size:12px;}.hs-drop{position:absolute;top:calc(100% + 4px);right:0;z-index:120;min-width:280px;max-width:360px;max-height:320px;overflow-y:auto;display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-inverted);border-radius:10px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);padding:4px;}.hs-item{border:none;background:transparent;text-align:left;border-radius:8px;padding:6px 8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary);cursor:pointer;white-space:normal;}.hs-item:hover{background:var(--dsw-alias-interactive-bg-hover);}.hs-snippet{display:block;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}.hs-empty{padding:6px 8px;font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-mrow{display:flex;gap:4px;align-items:center;}.pp-mid{flex:1 1 auto;}.pp-mnum{flex:0 0 74px;}.pp-mdel{flex:none;}' )
+    styles.insert('.pp-plus{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;}.pp-plus:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}.pp-panel{position:absolute;right:0;bottom:calc(100% + 8px);z-index:100;width:min(440px,calc(100vw - 48px));max-height:min(66vh,600px);display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);padding:10px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);overflow:hidden;}.pp-head{display:flex;align-items:center;justify-content:space-between;padding:2px 2px 8px;flex:none;}.pp-title{font-weight:600;font-size:14px;}.pp-close{border:none;background:transparent;color:var(--dsw-alias-label-secondary);font-size:18px;cursor:pointer;line-height:1;padding:2px 8px;border-radius:6px;}.pp-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}.pp-body{overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:0;}.pp-form{gap:8px;}.pp-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;flex:none;}.pp-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;}.pp-row-title{display:flex;align-items:center;gap:6px;}.pp-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-secondary);flex:none;}.pp-dot-ok{background:var(--dsw-alias-state-success-primary);}.pp-dot-no{background:var(--dsw-alias-state-warn-primary);}.pp-name{font-weight:600;}.pp-key{color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;}.pp-badge{font-size:11px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);}.pp-badge-custom{color:var(--dsw-alias-brand-primary);}.pp-row-sub{display:flex;gap:8px;color:var(--dsw-alias-label-secondary);font-size:12px;flex-wrap:wrap;}.pp-env{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}.pp-models{font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;}.pp-row-actions{display:flex;gap:6px;flex:none;}.pp-btn{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;}.pp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-btn-danger{color:var(--dsw-alias-state-error-primary);}.pp-btn-primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);font-weight:600;}.pp-btn:disabled{opacity:.5;cursor:default;}.pp-add{margin-top:4px;border:1px dashed var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-brand-primary);border-radius:10px;padding:8px;cursor:pointer;font-size:13px;flex:none;}.pp-add:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-hint{color:var(--dsw-alias-label-secondary);font-size:12px;}.pp-err{color:var(--dsw-alias-state-error-primary);font-size:12px;margin-top:6px;white-space:pre-wrap;word-break:break-word;flex:none;}.pp-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;margin-top:6px;flex:none;}.pp-status{color:var(--dsw-alias-label-secondary);font-size:12px;margin-top:6px;flex:none;}.pp-foot{color:var(--dsw-alias-label-secondary);font-size:11px;margin-top:4px;flex:none;}.pp-field{display:flex;flex-direction:column;gap:4px;flex:none;}.pp-label{font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-label2{font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-input{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);border-radius:8px;padding:6px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;}.pp-input:focus{border-color:var(--dsw-alias-brand-primary);}.pp-input:disabled{opacity:.6;}.pp-actions{display:flex;gap:8px;margin-top:2px;flex:none;flex-wrap:wrap;}.pp-check{display:flex;gap:6px;align-items:center;color:var(--dsw-alias-label-primary);cursor:pointer;font-size:12px;}.pp-picker-head{display:flex;align-items:center;gap:8px;padding-bottom:6px;flex:none;}.pp-title2{font-weight:600;}.pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}.pp-tpl{display:flex;flex-direction:column;gap:2px;text-align:left;border:1px solid var(--dsw-alias-border-l1);background:transparent;border-radius:10px;padding:8px 10px;cursor:pointer;color:var(--dsw-alias-label-primary);}.pp-tpl:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-tpl-name{font-weight:600;font-size:13px;}.pp-tpl-key{font-size:11px;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.pp-tpl-custom{border-style:dashed;}.pp-chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;}.pp-chip{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);border-radius:999px;padding:2px 8px;font-size:11px;cursor:pointer;}.pp-chip:hover{background:var(--dsw-alias-interactive-bg-hover);}.pp-chip-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-interactive-bg-hover);}.pp-search{margin-bottom:2px;flex:none;}.pp-shot-busy{opacity:.5;}.pp-defrow{display:flex;align-items:center;gap:6px;flex:none;}.pp-defsel{flex:1 1 auto;width:auto;padding:4px 8px;font-size:12px;}.pp-mlist{display:flex;flex-direction:column;gap:4px;}.hs-wrap{position:relative;flex:none;}.hs-input{width:150px;padding:4px 8px;font-size:12px;}.hs-drop{position:absolute;top:calc(100% + 4px);right:0;z-index:120;min-width:280px;max-width:360px;max-height:320px;overflow-y:auto;display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-inverted);border-radius:10px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);padding:4px;}.hs-item{border:none;background:transparent;text-align:left;border-radius:8px;padding:6px 8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary);cursor:pointer;white-space:normal;}.hs-item:hover{background:var(--dsw-alias-interactive-bg-hover);}.hs-snippet{display:block;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}.hs-empty{padding:6px 8px;font-size:12px;color:var(--dsw-alias-label-secondary);}.pp-mrow{display:flex;gap:4px;align-items:center;}.pp-mid{flex:1 1 auto;}.pp-mnum{flex:0 0 74px;}.pp-mdel{flex:none;}' )
 
     slots.inject('conversation.session.header.utilities', () => slots.register(
       { name: 'conversation.session.header.utilities', id: 'history-search', order: 1 },
       () => React.createElement(HistorySearch),
     ))
     slots.inject('conversation.input.right', () => slots.register(
+      { name: 'conversation.input.right', id: 'screenshot-btn', order: -1 },
+      (props) => React.createElement(ScreenshotButton, props),
+    ))
+    slots.inject('conversation.input.right', () => slots.register(
       { name: 'conversation.input.right', id: 'provider-plus', order: 0 },
-      () => React.createElement(PlusButton),
+      (props) => React.createElement(PlusButton, props),
     ))
     slots.inject('conversation.input.overlay', () => slots.register(
       { name: 'conversation.input.overlay', id: 'provider-panel', order: 2 },
