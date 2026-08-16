@@ -99,6 +99,7 @@ return {
               if (m !== null && typeof m === 'object' && typeof m.name === 'string') e.name = m.name
               if (m !== null && typeof m === 'object' && typeof m.contextWindow === 'number') e.contextWindow = m.contextWindow
               if (m !== null && typeof m === 'object' && typeof m.maxTokens === 'number') e.maxTokens = m.maxTokens
+              if (m !== null && typeof m === 'object' && Array.isArray(m.input) && m.input.includes('image')) e.image = true
               return e
             })
             : undefined
