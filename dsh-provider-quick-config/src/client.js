@@ -237,6 +237,7 @@ window.__ModuleLoader__.load({
         data: null, editing: null, draft: null, confirmKey: null, query: '',
         // 媒体展示台：开关状态持久化（localStorage），点开一次常驻右侧
         showcaseOpen: false, showcaseSession: null, showcaseItems: null, showcaseBusy: false, showcaseError: null,
+        showcaseInputActions: null,
       }
       try {
         store.showcaseOpen = localStorage.getItem('pp.showcaseOpen') === '1'
@@ -970,7 +971,8 @@ window.__ModuleLoader__.load({
         } else {
           media = h('span', { className: 'sc-empty' }, item.name)
         }
-        var insertable = item.kind === 'image'
+        var insertable = item.kind === 'image' || item.kind === 'video' || item.kind === 'audio'
+        var insertLabel = item.kind === 'image' ? '插入对话' : '插入路径'
         return h('div', { className: 'sc-item' + (props.selected ? ' sc-item-sel' : ''),
             onClick: () => { if (props.onSelect !== undefined) props.onSelect(item) } },
           h('div', { className: 'sc-media' }, media),
@@ -981,7 +983,7 @@ window.__ModuleLoader__.load({
           h('div', { className: 'sc-item-actions' },
             h('button', { type: 'button', className: 'sc-insert', disabled: !insertable,
                 onClick: (e) => { e.stopPropagation(); if (props.onInsert !== undefined) props.onInsert(item) } },
-              insertable ? '插入对话' : '仅预览')))
+              insertLabel)))
       }
       function ShowcasePanel() {
         var s = useStore()
@@ -1013,23 +1015,33 @@ window.__ModuleLoader__.load({
             }))
         }
         function doInsert(item) {
-          if (item.kind !== 'image') return
-          // 图片通过 fetch 拿 blob → createDraftImages → 加入草稿
-          fetch(mediaUrl(s.showcaseSession, item.path)).then(function (res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status)
-            return res.blob()
-          }).then(function (blob) {
-            var conv = ctx.get('conversation')
-            if (conv === undefined || typeof conv.createDraftImages !== 'function') {
-              setState({ showcaseError: '当前环境不支持插入图片' })
-              return
-            }
-            var file = new File([blob], item.name, { type: blob.type || 'application/octet-stream' })
-            var ids = conv.createDraftImages([file])
-            setState({ showcaseError: null })
-          }).catch(function (e) {
-            setState({ showcaseError: messageOf(e) })
-          })
+          if (item.kind === 'image') {
+            // 图片通过 fetch 拿 blob → createDraftImages → 加入草稿
+            fetch(mediaUrl(s.showcaseSession, item.path)).then(function (res) {
+              if (!res.ok) throw new Error('HTTP ' + res.status)
+              return res.blob()
+            }).then(function (blob) {
+              var conv = ctx.get('conversation')
+              if (conv === undefined || typeof conv.createDraftImages !== 'function') {
+                setState({ showcaseError: '当前环境不支持插入图片' })
+                return
+              }
+              var file = new File([blob], item.name, { type: blob.type || 'application/octet-stream' })
+              var ids = conv.createDraftImages([file])
+              setState({ showcaseError: null })
+            }).catch(function (e) {
+              setState({ showcaseError: messageOf(e) })
+            })
+            return
+          }
+          // 视频/录音：插入路径文本到输入框（对话提到它 → 展示台闭环）
+          var ia = store.showcaseInputActions
+          if (ia === null || typeof ia.setDraft !== 'function') {
+            setState({ showcaseError: '当前环境不支持插入文本' })
+            return
+          }
+          ia.setDraft(item.path)
+          setState({ showcaseError: null })
         }
         return h('div', null,
           // 常驻侧栏：不设全屏遮罩（overlay 层本身点击穿透），不挡对话框交互
@@ -1049,6 +1061,10 @@ window.__ModuleLoader__.load({
       function ShowcaseButton(props) {
         var s = useStore()
         var sid = props.sessionId !== undefined ? props.sessionId : null
+        // 把当前会话的输入操作面存进 store，供 root-scope 的展示台面板用
+        if (props.inputActions !== undefined && store.showcaseInputActions !== props.inputActions) {
+          setState({ showcaseInputActions: props.inputActions })
+        }
         if (sid !== null && s.showcaseSession !== sid) {
           // 会话切换时同步并触发一次加载
           setState({ showcaseSession: sid, showcaseItems: null })
