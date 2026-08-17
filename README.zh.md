@@ -19,13 +19,13 @@
 
 ### 正式安装（本机已装好）
 
-已打包成 `dsh-provider-quick-config-0.4.0.tgz` 并装进 `web` profile：
+已打包成 `dsh-provider-quick-config-0.5.4.tgz` 并装进 `web` profile：
 
 ```bash
 cd /path/to/deepseek-harness
 # 打包（在 dsh-provider-quick-config/ 里执行）：npm pack
 node --import tsx/esm apps/cli/src/bin.ts plugin --profile web add \
-  file:/path/to/dsh-provider-quick-config/dsh-provider-quick-config-0.4.0.tgz
+  file:/path/to/dsh-provider-quick-config/dsh-provider-quick-config-0.5.4.tgz
 cd ~/.dsh/profiles/web && pnpm install   # 仅当 tarball 路径变化时需要
 ```
 
@@ -50,7 +50,8 @@ cat ~/.dsh/profiles/web/package.json
 - **本地模型自动加载**：选 Ollama 预设后自动请求 `GET /models` 把本机模型列表填进表单（也可在任何自定义路由上点"自动获取模型"）；
 - **本地模型自动同步（syncModels）**：路由打上 `syncModels: true`（ollama 预设默认开、表单可勾选、列表有"自动同步"徽标）后，插件**后台每 60 秒**对比端点 `GET /models` 与当前配置——端点模型变了（比如 `ollama pull` 新模型）就**自动写回 settings.yaml**，下拉框自动跟上，不用手动补。端点顺序为准，已配置模型的 ctx/max 保留。已端到端验证（删掉 gemma4 后一个周期内自动加回）。
 - **同一厂商加多个 key**：再点同一个厂商，key 自动排号（glm → glm2 → glm3…），显示名自动带"号N"；
-- **媒体展示台（🎞）**：会话标题栏的 🎞 按钮打开右侧常驻面板，自动扫描当前会话历史，把对话里提到的**图片 / 视频 / 录音**全部展示出来（支持相对工作目录路径，**找不到时按文件名递归搜索兜底**——比如文本写 `tiile-20260815/x.mp4` 但实际在 `outputs/tiile-20260815/` 下，也能找到）。条目**按对话轮次分组**（第 1 轮、第 2 轮…）。媒体数据**不进模型上下文**，纯展示。每个条目可"插入路径"写进输入框，图片额外可"插入对话"（附件）。
+- **媒体展示台（🎞）**：会话标题栏的 🎞 按钮打开右侧常驻面板，自动扫描当前会话历史，把对话里提到的**图片（PNG/JPEG/WebP/GIF/AVIF/BMP/SVG/ICO）/ 视频 / 录音**全部展示出来（SVG 通过 `<img>` 原生渲染）。支持相对工作目录路径，**找不到时按文件名递归搜索兜底**——比如文本写 `tiile-20260815/x.mp4` 但实际在 `outputs/tiile-20260815/` 下，也能找到。条目**按对话轮次分组**（第 1 轮、第 2 轮…）。媒体数据**不进模型上下文**，纯展示。每个条目可"插入路径"写进输入框，光栅图片额外可"插入对话"（附件）。展示台还会自动扫描 `<cwd>/.uploads/`（SVG/通用上传）与 `<cwd>/.screenshots/`（截图库），分别归到"上传库轮"和"截图库轮"，文件落盘即可见。
+- **SVG 上传 + 路径插入**：上传按钮现接受 `.svg`（PNG/JPEG/WebP/GIF 仍走对话图片附件）。SVG 走新加的 `save-media` 端点，落到 `<会话工作目录>/.uploads/<文件名>`，并把 `![name](<绝对路径>)` 追加到输入框——发出后模型侧拿到的是 markdown 文本，UI 上以 SVG 内联展示，展示台里也以 `<img>` 渲染。同样可以直接把 `.svg` 文件丢进 `<cwd>/.uploads/`（拖拽 / `mv` / 粘贴脚本），无需经上传按钮也会出现在展示台。
 - **截图 📷**：`getDisplayMedia` 截屏后**默认保存到 `<会话工作目录>/.screenshots/`**（即展示台多媒体库目录，已 gitignore），并把返回路径写进输入框——由你决定是否发送。保存后自动出现在展示台里。
 - 或添加**自定义 OpenAI 兼容** Provider（自建网关 / 本地服务，手写 `api`、`baseURL`、`thinkingFormat`、模型列表）；
 - 编辑 / 删除已有路由；填写或更新 API 密钥。

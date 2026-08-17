@@ -19,13 +19,13 @@
 
 ### Formal install (already done on this machine)
 
-The package was built, packed (`dsh-provider-quick-config-0.4.0.tgz`) and installed into the `web` profile:
+The package was built, packed (`dsh-provider-quick-config-0.5.4.tgz`) and installed into the `web` profile:
 
 ```bash
 cd /path/to/deepseek-harness
 # pack the package (in dsh-provider-quick-config/): npm pack
 node --import tsx/esm apps/cli/src/bin.ts plugin --profile web add \
-  file:/path/to/dsh-provider-quick-config/dsh-provider-quick-config-0.4.0.tgz
+  file:/path/to/dsh-provider-quick-config/dsh-provider-quick-config-0.5.4.tgz
 cd ~/.dsh/profiles/web && pnpm install   # only needed when the tarball path changed
 ```
 
@@ -50,7 +50,8 @@ A **+** button next to the **Send** button in the DeepSeek Harness Web GUI. Clic
 - **Auto-load local models**: picking the Ollama preset immediately fetches `GET /models` and fills the form (a "Fetch models" button exists on every custom route too).
 - **Auto-sync local models (syncModels)**: routes marked `syncModels: true` (Ollama preset on by default, toggle in the form, badge in the list) are compared against their endpoint's `GET /models` **every 60s in the background**; when the endpoint list changes (e.g. you `ollama pull` a new model) the plugin writes the new list back to settings.yaml automatically and the dropdown follows — no manual editing. Endpoint order wins, capacities of already-configured models are preserved. Verified end-to-end.
 - **Multiple API keys per vendor**: add the same vendor again and the route key auto-numbers (`glm` → `glm2` → `glm3`…), display name gets `· 号N`.
-- **Media showcase (🎞)**: a persistent right-side panel that scans the current session's history and shows every media file the conversation mentioned — images, videos, recordings. Files are resolved from the session's working directory, with a **filename search fallback** (a file whose text reference is missing a path prefix, e.g. `tiile-20260815/x.mp4` actually under `outputs/tiile-20260815/`, is still found). Items are **grouped by conversation turn** ("第 1 轮", "第 2 轮"…). Media data never enters the model context — display only. Each item can **insert its path** into the composer (`inputActions.setDraft`), and images can additionally be **inserted as an attachment**.
+- **Media showcase (🎞)**: a persistent right-side panel that scans the current session's history and shows every media file the conversation mentioned — **images (PNG/JPEG/WebP/GIF/AVIF/BMP/SVG/ICO), videos, recordings**. SVG renders natively in `<img>`. Files are resolved from the session's working directory, with a **filename search fallback** (a file whose text reference is missing a path prefix, e.g. `tiile-20260815/x.mp4` actually under `outputs/tiile-20260815/`, is still found). Items are **grouped by conversation turn** ("第 1 轮", "第 2 轮"…). Media data never enters the model context — display only. Each item can **insert its path** into the composer (`inputActions.setDraft`), and raster images can additionally be **inserted as an attachment**. The panel also auto-scans `<cwd>/.uploads/` (SVG/通用上传) and `<cwd>/.screenshots/` (截图库) so files written there appear automatically, grouped into separate "upload library" and "screenshot library" turns.
+- **SVG upload + insert path**: the upload button accepts `.svg` (PNG/JPEG/WebP/GIF still go through as image attachments). SVG files are saved to `<session cwd>/.uploads/<name>` via the new `save-media` endpoint, and the path is appended to the composer as `![name](<abs path>)` — visible inline once sent, and the SVG appears in the media showcase (it can also be dragged or pasted from the file system into `<cwd>/.uploads/` to land in the showcase).
 - **Screenshot 📷**: captures the screen via `getDisplayMedia`, **saves the PNG into `<session cwd>/.screenshots/`** (the media-showcase library folder, gitignored) and writes the returned path into the composer — you decide whether to send it. The saved screenshot automatically appears in the showcase.
 - Custom **OpenAI-compatible** providers (any gateway / self-hosted server) with hand-written `api`, `baseURL`, `thinkingFormat`, and model list.
 - Edit / delete existing routes; set or update API keys.
