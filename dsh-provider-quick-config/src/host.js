@@ -398,6 +398,8 @@ module.exports = {
           if (d !== undefined && d !== '' && !searchRoots.some(function (r) { return r === d })) searchRoots.push(d)
         }
       }
+      // 按真实路径聚合：一份文件一条 item，turns[] 记录所有被引用的轮次（去重、按时间升序）
+      const byPath = new Map()
       for (const entry of texts) {
         const found = extractMediaFromText(entry.text)
         for (const f of found) {
@@ -406,11 +408,94 @@ module.exports = {
           seen.add(key)
           const resolved = await resolveWithCwd(cwd, f.raw, searchRoots)
           if (resolved === undefined) continue
-          if (items.some((x) => x.path === resolved.path)) continue
-          // 带轮次：同一文件可能在多轮被提到，只记首次出现的轮次
-          items.push(Object.assign({ turn: entry.turn }, resolved))
+          const existing = byPath.get(resolved.path)
+          if (existing !== undefined) {
+            // 同一文件在另一轮又被提到：append turn
+            if (existing.turns.indexOf(entry.turn) === -1) existing.turns.push(entry.turn)
+          } else {
+            byPath.set(resolved.path, Object.assign({
+              firstTurn: entry.turn,
+              turns: [entry.turn],
+            }, resolved))
+          }
         }
       }
+      // 扫描 <cwd>/.screenshots/ 目录：截图保存到这里，不依赖文本提及，自动归到"截图库"轮
+      // 放在所有文本媒体轮次之后——给当前最大轮次 + 1 作为"截图库"轮
+      // 同样扫描 <cwd>/.uploads/ 目录：通用上传（SVG 等不被对话服务收为图片附件的格式）也归到上传库轮
+      let maxTurn = 0
+      for (const it of byPath.values()) {
+        for (const t of it.turns) if (t > maxTurn) maxTurn = t
+      }
+      const screenshotTurn = maxTurn + 1
+      const uploadTurn = maxTurn + 2
+      if (cwd !== undefined && cwd !== '') {
+        try {
+          const nodeFs = require('node:fs')
+          const nodePath = require('node:path')
+          // .screenshots/ 扫描
+          const shotDir = nodePath.join(cwd, '.screenshots')
+          if (nodeFs.existsSync(shotDir)) {
+            const files = nodeFs.readdirSync(shotDir, { withFileTypes: true })
+            for (const f of files) {
+              if (!f.isFile()) continue
+              const lower = f.name.toLowerCase()
+              if (!/\.(png|jpe?g|gif|webp|bmp|svg|ico|mp4|webm|mov|mkv|mp3|wav|m4a|ogg|flac)$/.test(lower)) continue
+              const abs = nodePath.join(shotDir, f.name)
+              const key = normPath(abs)
+              if (seen.has(key)) continue
+              seen.add(key)
+              const ext = lower.slice(lower.lastIndexOf('.'))
+              let size = 0
+              try { size = nodeFs.statSync(abs).size } catch (e) { /* skip */ }
+              if (size <= 0) continue
+              byPath.set(key, {
+                path: key,
+                name: f.name,
+                ext: ext,
+                kind: mediaKind(ext),
+                size: size,
+                firstTurn: screenshotTurn,
+                turns: [screenshotTurn],
+                source: 'screenshot',
+              })
+            }
+          }
+        } catch (e) { /* .screenshots scan best-effort */ }
+        try {
+          const nodeFs = require('node:fs')
+          const nodePath = require('node:path')
+          // .uploads/ 扫描：SVG/通用上传，与截图库分轮次，避免互相吃掉
+          const upDir = nodePath.join(cwd, '.uploads')
+          if (nodeFs.existsSync(upDir)) {
+            const files = nodeFs.readdirSync(upDir, { withFileTypes: true })
+            for (const f of files) {
+              if (!f.isFile()) continue
+              const lower = f.name.toLowerCase()
+              if (!/\.(png|jpe?g|gif|webp|bmp|svg|ico|mp4|webm|mov|mkv|mp3|wav|m4a|ogg|flac)$/.test(lower)) continue
+              const abs = nodePath.join(upDir, f.name)
+              const key = normPath(abs)
+              if (seen.has(key)) continue
+              seen.add(key)
+              const ext = lower.slice(lower.lastIndexOf('.'))
+              let size = 0
+              try { size = nodeFs.statSync(abs).size } catch (e) { /* skip */ }
+              if (size <= 0) continue
+              byPath.set(key, {
+                path: key,
+                name: f.name,
+                ext: ext,
+                kind: mediaKind(ext),
+                size: size,
+                firstTurn: uploadTurn,
+                turns: [uploadTurn],
+                source: 'upload',
+              })
+            }
+          }
+        } catch (e) { /* .uploads scan best-effort */ }
+      }
+      for (const it of byPath.values()) items.push(it)
       return items
     }
     function attachMediaRoutes() {
@@ -570,7 +655,72 @@ module.exports = {
           }
         },
       })
-      return () => { try { listDisposer() } catch (e) {} try { fileDisposer() } catch (e) {} try { shotDisposer() } catch (e) {} }
+      // 通用媒体上传：POST ?session=<id>，body JSON { name, dataBase64, mime }
+      // 用于 SVG 等"对话服务拒收为图片附件"的格式：写入 <会话cwd>/.screenshots/<name>
+      // 然后由客户端把 markdown 链接插入输入框，文件路径会被媒体展示台识别。
+      // 扩展名白名单 = MEDIA_EXT 的键集合，避免任意写入。
+      const validExts = Object.keys(MEDIA_EXT).map(function (e) { return e.slice(1) }).join('|')
+      const VALID_NAME_RE = new RegExp('^[\\w.\\u4e00-\\u9fa5\\- ]+\\.(?:' + validExts + ')$', 'i')
+      const uploadDisposer = server.register({
+        kind: 'exact',
+        path: '/plugins/provider-quick-config/save-media',
+        handler: async (req, res) => {
+          const q = queryOf(req.url)
+          const sid = q.session || ''
+          let bodyStr = ''
+          try {
+            for await (const chunk of req) bodyStr += chunk
+          } catch (e) { /* empty body */ }
+          let parsed = null
+          try { parsed = JSON.parse(bodyStr) } catch (e) { parsed = null }
+          const name = parsed !== null && typeof parsed.name === 'string' ? parsed.name : ''
+          const dataBase64 = parsed !== null && typeof parsed.dataBase64 === 'string' ? parsed.dataBase64 : ''
+          if (sid === '' || name === '' || dataBase64 === '') {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'missing session/name/data' }))
+            return
+          }
+          if (!VALID_NAME_RE.test(name)) {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'unsupported extension (allowed: ' + Object.keys(MEDIA_EXT).join(' ') + ')' }))
+            return
+          }
+          try {
+            let cwd = undefined
+            const sq = ctx.get('sessionQuery')
+            if (sq !== undefined && typeof sq.readSession === 'function') {
+              const snap = await sq.readSession(sid)
+              if (snap !== undefined && snap !== null && snap.session !== undefined && snap.session !== null
+                && typeof snap.session.cwd === 'string') cwd = snap.session.cwd
+            }
+            if (cwd === undefined) {
+              res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' })
+              res.end(JSON.stringify({ error: 'session cwd unknown' }))
+              return
+            }
+            const nodeFs = require('node:fs')
+            const nodePath = require('node:path')
+            // SVG 等非截图类统一放 <cwd>/.uploads/（与 .screenshots 区分），媒体展示台都扫
+            const uploadDir = nodePath.join(cwd, '.uploads')
+            nodeFs.mkdirSync(uploadDir, { recursive: true })
+            const safe = name.replace(/[^\w.\u4e00-\u9fa5\- ]/g, '_')
+            const abs = nodePath.join(uploadDir, safe)
+            const buf = Buffer.from(dataBase64, 'base64')
+            nodeFs.writeFileSync(abs, buf)
+            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ path: abs, name: safe }))
+          } catch (e) {
+            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: String((e && e.message) || e) }))
+          }
+        },
+      })
+      return () => {
+        try { listDisposer() } catch (e) {}
+        try { fileDisposer() } catch (e) {}
+        try { shotDisposer() } catch (e) {}
+        try { uploadDisposer() } catch (e) {}
+      }
     }
 
     // 后台自动同步；ctx.setInterval 是 fiber 作用域定时器，插件卸载自动清理。

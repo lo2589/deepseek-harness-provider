@@ -608,20 +608,97 @@ window.__ModuleLoader__.load({
 
       function UploadButton(props) {
         var inputRef = React.useRef(null)
-        function onChange(e) {
+        var busyRef = React.useRef(false)
+        function readAsBase64(file) {
+          return new Promise(function (res, rej) {
+            var reader = new FileReader()
+            reader.onload = function () {
+              var s = String(reader.result)
+              var comma = s.indexOf(',')
+              res(comma >= 0 ? s.slice(comma + 1) : s)
+            }
+            reader.onerror = function () { rej(reader.error || new Error('read failed')) }
+            reader.readAsDataURL(file)
+          })
+        }
+        function appendToDraft(text) {
+          var ia = props.inputActions
+          if (ia === undefined) return false
+          var current = ''
+          if (props.useInput !== undefined) {
+            try { current = String(props.useInput(function (st) { return st ? st.draft : '' }) || '') } catch (e) {}
+          }
+          var next = current === '' ? text : (current.replace(/\s+$/, '') + '\n\n' + text + '\n')
+          ia.setDraft(next)
+          return true
+        }
+        async function uploadOne(file, sid) {
+          var base64 = await readAsBase64(file)
+          var res = await fetch('/plugins/provider-quick-config/save-media?session=' + encodeURIComponent(sid), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: file.name, dataBase64: base64 }),
+          })
+          if (!res.ok) {
+            var body = await res.text().catch(function () { return '' })
+            throw new Error('save-media HTTP ' + res.status + (body !== '' ? ': ' + body : ''))
+          }
+          var out = await res.json()
+          if (!out || typeof out.path !== 'string') throw new Error('save-media bad response')
+          return out
+        }
+        async function onChange(e) {
           var files = Array.from(e.target.files || [])
           e.target.value = ''
           if (files.length === 0) return
+          if (busyRef.current) return
+          busyRef.current = true
           var conversation = ctx.get('conversation')
-          if (conversation === undefined || props.inputActions === undefined) return
-          var images = conversation.createDraftImages(files)
-          if (images.length > 0 && !props.inputActions.addImages(images.map(function (i) { return i.id }))) {
-            conversation.releaseDraftImages(images)
+          var sid = props.sessionId
+          if (props.inputActions === undefined) { busyRef.current = false; return }
+          var imgSet = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1, 'image/gif': 1 }
+          var imageFiles = []
+          var otherFiles = []
+          for (var i = 0; i < files.length; i++) {
+            var f = files[i]
+            if (imgSet[f.type] === 1) imageFiles.push(f)
+            else otherFiles.push(f)
+          }
+          var failures = []
+          var inserted = 0
+          try {
+            if (imageFiles.length > 0 && conversation !== undefined) {
+              try {
+                var images = conversation.createDraftImages(imageFiles)
+                if (images.length > 0 && !props.inputActions.addImages(images.map(function (i) { return i.id }))) {
+                  conversation.releaseDraftImages(images)
+                }
+              } catch (e2) { failures.push('image: ' + (e2.message || e2)) }
+            }
+            if (otherFiles.length > 0) {
+              if (typeof sid !== 'string' || sid === '') {
+                failures.push('SVG/other: no session')
+              } else {
+                for (var k = 0; k < otherFiles.length; k++) {
+                  try {
+                    var out = await uploadOne(otherFiles[k], sid)
+                    var name = out.name || otherFiles[k].name
+                    var path = out.path
+                    appendToDraft('![' + name + '](' + path + ')')
+                    inserted += 1
+                  } catch (e2) { failures.push((otherFiles[k].name || 'file') + ': ' + (e2.message || e2)) }
+                }
+              }
+            }
+          } finally {
+            busyRef.current = false
           }
         }
         return h('div', { className: 'pp-uploadwrap' },
-          h('input', { ref: inputRef, type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' }, onChange: onChange }),
-          h('button', { type: 'button', className: 'pp-plus pp-upload', title: '从本地选择图片', 'aria-label': '上传图片',
+          h('input', { ref: inputRef, type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg', multiple: true, style: { display: 'none' }, onChange: onChange }),
+          h('button', { type: 'button', className: 'pp-plus pp-upload',
+            title: '从本地选择图片 / SVG（图片走对话附件；SVG 写入 <cwd>/.uploads/ 并把路径插入输入框，媒体展示台识别）',
+            'aria-label': '上传图片或 SVG',
             onClick: function () { if (inputRef.current !== null) inputRef.current.click() } },
             h('svg', { viewBox: '0 0 24 24', width: 15, height: 15, 'aria-hidden': true },
               h('path', { d: 'M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z', fill: 'currentColor' }))))
