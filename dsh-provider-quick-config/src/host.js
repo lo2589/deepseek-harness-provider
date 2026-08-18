@@ -540,12 +540,28 @@ module.exports = {
             return
           }
           try {
+            // 路径/大小解析：首选 fs 服务（走 sandbox），失败/拒绝访问时用 node:fs 兜底。
+            // 兜底场景：fs 服务对 .screenshots/ 等隐藏目录拒绝 readBytes → 列出但读不出。
+            let size = 0
+            let nodeFs
+            try { nodeFs = require('node:fs') } catch (e) { nodeFs = undefined }
             const fsSvc = fsOf()
-            if (fsSvc === undefined) throw new Error('fs unavailable')
-            const target = await fsSvc.resolve(p)
-            const info = await fsSvc.stat(target)
-            if (info === undefined || info.type !== 'file') throw new Error('not a file')
-            const size = info.size
+            try {
+              if (fsSvc !== undefined) {
+                const target = await fsSvc.resolve(p)
+                const info = await fsSvc.stat(target)
+                if (info !== undefined && info.type === 'file') {
+                  size = info.size
+                }
+              }
+            } catch (e) { /* fall through to node:fs stat */ }
+            if (size === 0 && nodeFs !== undefined) {
+              try {
+                const st = nodeFs.statSync(p)
+                if (st.isFile() && st.size > 0) size = st.size
+              } catch (e) { /* path truly inaccessible */ }
+            }
+            if (size === 0) throw new Error('not a file')
             const cap = 200 * 1024 * 1024
             if (size > cap) {
               res.writeHead(413, { 'content-type': 'text/plain; charset=utf-8' })
@@ -574,24 +590,33 @@ module.exports = {
                 'content-range': 'bytes ' + start + '-' + chunkEnd + '/' + size,
                 'content-length': String(length),
               }))
-              // 有 node:fs 就流式读分片；没有就整读后切
-              let nodeFs
-              try { nodeFs = require('node:fs') } catch (e) { nodeFs = undefined }
+              // 读字节：复用外层解析过的 nodeFs（隐藏目录、sandbox 拒访时仍能读），否则走 fs 服务
               if (nodeFs !== undefined) {
                 const nodePath = require('node:path')
                 const abs = nodePath.resolve(p)
                 const stream = nodeFs.createReadStream(abs, { start, end: chunkEnd })
                 stream.on('error', () => { res.destroy() })
                 stream.pipe(res)
-              } else {
+              } else if (fsSvc !== undefined) {
+                const target = await fsSvc.resolve(p)
                 const bytes = await fsSvc.readBytes(target, undefined, cap)
                 const slice = bytes.subarray(start, chunkEnd + 1)
                 res.end(slice)
+              } else {
+                throw new Error('no read backend')
               }
               return
             }
             // 无 Range：整文件
-            const bytes = await fsSvc.readBytes(target, undefined, cap)
+            let bytes = null
+            if (nodeFs !== undefined) {
+              try { bytes = nodeFs.readFileSync(p) } catch (e) { bytes = null }
+            }
+            if (bytes === null && fsSvc !== undefined) {
+              const target = await fsSvc.resolve(p)
+              bytes = await fsSvc.readBytes(target, undefined, cap)
+            }
+            if (bytes === null) throw new Error('read failed')
             res.writeHead(200, Object.assign({}, baseHeaders, { 'content-length': String(size) }))
             res.end(bytes)
           } catch (e) {
