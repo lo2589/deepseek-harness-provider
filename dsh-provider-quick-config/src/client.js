@@ -889,33 +889,34 @@ window.__ModuleLoader__.load({
           setBusy(true)
           var stream
           try {
-            // 关键约束组合 —— 强制截取当前浏览器 tab：
-            // 1. displaySurface: 'browser' (Chrome) — 系统选择器只列出浏览器选项（标签 + 窗口）
-            // 2. selfBrowserSurface: 'include' (Chrome 124+) — 强制包含当前浏览器，不被排除
-            // 3. preferCurrentTab: true (Chrome 94+) — 把"当前标签"选项置顶
-            // 4. monitorTypeSurfaces: 'exclude' (Chrome 124+) — 从选择器移除"整个屏幕"选项，
-            //    强制用户选浏览器 tab（避免 macOS 焦点在选完时跳到其他应用）
-            // 5. systemAudio: 'exclude' — 静音
-            // 6. CaptureController.setFocusBehavior('no-focus-change') (Chrome 109+) —
-            //    即使焦点被抢也把焦点拉回 capturing app
-            // 浏览器不支持的字段静默跳过，最终回退到 { video: true }。
+            // 跨浏览器兼容策略：先特征检测，再决定一组 constraints
+            //   Chrome 124+：用 displaySurface=browser + selfBrowserSurface=include
+            //     + preferCurrentTab + monitorTypeSurfaces=exclude，强制选项里的"当前 tab"
+            //     置顶，避免 macOS 焦点跳走
+            //   Safari/Firefox/旧 Chrome：未实现这些字段，回退到 { video: true }。
+            //     Safari 在 macOS 上只能选"整个屏幕"（无 browser/window 选项），stream
+            //     内容是整个屏幕，焦点跳走问题无法在本项目代码范围解决。
             var dsmConstraints = { video: true }
+            var isChrome = false
             try {
-              var probe = navigator.mediaDevices.getSupportedConstraints()
-              var videoC = {}
-              if (probe !== undefined) {
-                if (probe.displaySurface === true) videoC.displaySurface = 'browser'
-                if (probe.selfBrowserSurface === true) videoC.selfBrowserSurface = 'include'
-                if (probe.preferCurrentTab === true) videoC.preferCurrentTab = true
-                if (probe.monitorTypeSurfaces === true) videoC.monitorTypeSurfaces = 'exclude'
-                if (probe.frameRate === true) videoC.frameRate = { ideal: 15, max: 30 }
-              }
-              if (Object.keys(videoC).length > 0) {
-                videoC.systemAudio = 'exclude'
-                dsmConstraints = { video: videoC, audio: false }
-              }
-            } catch (e) { /* probe best-effort */ }
-            // CaptureController 防止焦点跳走（Chrome 109+）
+              isChrome = /Chrome|Chromium|Edg\//i.test(typeof navigator !== 'undefined' && navigator.userAgent || '')
+            } catch (e) { /* UA check best-effort */ }
+            if (isChrome) {
+              try {
+                var probe = navigator.mediaDevices.getSupportedConstraints()
+                var videoC = {}
+                if (probe !== undefined) {
+                  if (probe.displaySurface === true) videoC.displaySurface = 'browser'
+                  if (probe.selfBrowserSurface === true) videoC.selfBrowserSurface = 'include'
+                  if (probe.preferCurrentTab === true) videoC.preferCurrentTab = true
+                  if (probe.monitorTypeSurfaces === true) videoC.monitorTypeSurfaces = 'exclude'
+                }
+                if (Object.keys(videoC).length > 0) {
+                  dsmConstraints = { video: videoC, audio: false }
+                }
+              } catch (e) { /* probe best-effort */ }
+            }
+            // CaptureController 仅 Chrome 109+ 支持，Safari/Firefox 无
             var controller = null
             try {
               if (typeof CaptureController !== 'undefined' && typeof CaptureController.prototype.setFocusBehavior === 'function') {
@@ -923,7 +924,7 @@ window.__ModuleLoader__.load({
                 try { controller.setFocusBehavior('no-focus-change') } catch (e2) { /* setFocusBehavior best-effort */ }
               }
             } catch (e) { /* CaptureController unsupported */ }
-            // 再保险：在调 getDisplayMedia 前主动把焦点抓回当前标签页
+            // 调 getDisplayMedia 前主动把焦点抓回当前标签页（部分浏览器有效）
             try {
               if (typeof window !== 'undefined' && window.focus !== undefined) window.focus()
               if (document !== undefined && document.body !== null && typeof document.body.focus === 'function') document.body.focus()
