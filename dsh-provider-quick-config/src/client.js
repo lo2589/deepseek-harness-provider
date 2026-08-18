@@ -889,28 +889,49 @@ window.__ModuleLoader__.load({
           setBusy(true)
           var stream
           try {
-            // 关键：displaySurface 显式声明，避免某些 macOS 窗口管理工具把 stream 路由到
-            // 它们的"窗口缩略图合成层"（"瀑布"——多个窗口快照叠加）。同时限定 15fps
-            // 减少合成器端多帧重采样造成的拖影。
-            // 浏览器不支持 displaySurface 时静默回退到 { video: true }。
+            // 关键约束组合：
+            // 1. selfBrowserSurface: 'include' (Chrome 124+) — 让系统选择器强制包含当前浏览器，
+            //    避免某些平台/扩展把 capture 路由到非当前浏览器窗口
+            // 2. systemAudio: 'exclude' — 静音
+            // 3. displaySurface: 'monitor' — 强制要求"整个屏幕"标签置顶
+            // 4. CaptureController.setFocusBehavior('no-focus-change') (Chrome 109+) —
+            //    关键：防止 getDisplayMedia 调用后焦点跳到其他应用 / 标签页，
+            //    stream 仍然显示当前浏览器所在的屏幕内容（而不是焦点所在的屏幕）
+            // 浏览器不支持的字段静默跳过，最终回退到 { video: true }。
             var dsmConstraints = { video: true }
             try {
               var probe = navigator.mediaDevices.getSupportedConstraints()
-              if (probe !== undefined && probe.displaySurface === true) {
-                dsmConstraints = {
-                  video: {
-                    displaySurface: 'monitor',
-                    frameRate: { ideal: 15, max: 30 },
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 },
-                  },
-                  audio: false,
-                }
+              var videoC = {}
+              if (probe !== undefined) {
+                if (probe.displaySurface === true) videoC.displaySurface = 'monitor'
+                if (probe.frameRate === true) videoC.frameRate = { ideal: 15, max: 30 }
+                if (probe.width === true) videoC.width = { ideal: 1920 }
+                if (probe.height === true) videoC.height = { ideal: 1080 }
+                if (probe.selfBrowserSurface === true) videoC.selfBrowserSurface = 'include'
+              }
+              if (Object.keys(videoC).length > 0) {
+                videoC.systemAudio = 'exclude'
+                dsmConstraints = { video: videoC, audio: false }
               }
             } catch (e) { /* probe best-effort */ }
+            // CaptureController 防止焦点跳走（Chrome 109+）
+            var controller = null
+            try {
+              if (typeof CaptureController !== 'undefined' && typeof CaptureController.prototype.setFocusBehavior === 'function') {
+                controller = new CaptureController()
+                try { controller.setFocusBehavior('no-focus-change') } catch (e2) { /* setFocusBehavior best-effort */ }
+              }
+            } catch (e) { /* CaptureController unsupported */ }
+            // 再保险：在调 getDisplayMedia 前主动把焦点抓回当前标签页
+            try {
+              if (typeof window !== 'undefined' && window.focus !== undefined) window.focus()
+              if (document !== undefined && document.body !== null && typeof document.body.focus === 'function') document.body.focus()
+            } catch (e) { /* focus best-effort */ }
             // 超时保护：部分浏览器在非用户激活上下文会静默挂起
             stream = await Promise.race([
-              navigator.mediaDevices.getDisplayMedia(dsmConstraints),
+              controller !== null
+                ? navigator.mediaDevices.getDisplayMedia(dsmConstraints, controller)
+                : navigator.mediaDevices.getDisplayMedia(dsmConstraints),
               new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout: getDisplayMedia')) }, 15000) }),
             ])
           } catch (e) {
