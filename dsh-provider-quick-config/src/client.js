@@ -1011,206 +1011,185 @@ window.__ModuleLoader__.load({
             setBusy(false)
           }
         }
-        // 选区截图：单帧抓取模式（模拟 macOS 系统截图的"按下就冻结"行为）
-        //   1. getDisplayMedia 拿 stream（一次性）
-        //   2. ImageCapture.grabFrame() 直接抓 1 帧 ImageBitmap（不需要 video 元素、不需要 play）
-        //   3. 立即 track.stop() 关闭 stream — 屏幕画面彻底静止
-        //   4. ImageBitmap 画到 canvas 显示
-        //   5. 用户拖框选区 → 截
-        // ImageCapture 不可用（如 Safari / Firefox）时回退到 video+烤帧。
+        // 选区截图：保留 stream 焦点 + 烤帧静态显示
+        //   1. 保持 stream 活跃（不立即 stop track）—— 让 macOS 焦点留在 DSH 标签页
+        //   2. video 拿到首帧后立即烤帧到 frameCanvas + video 暂停
+        //   3. frameCanvas 覆盖 video 显示（画面静止，拖框时不会有"上一帧"进来）
+        //   4. 用户拖框选区 → 从 frameCanvas 截
+        //   5. 拖框/取消后 stop track（stream 关闭）
+        // 关键：如果立即 stop track（c809313 之前那样），macOS 焦点会跳走，
+        //       stream 内容会被其他应用覆盖（截到剪映）。
         function selectRegion(stream) {
           return new Promise(function (resolve) {
-            captureOnce(stream).then(function (bitmap) {
-              if (bitmap === null) { resolve(null); return }
-              showOverlayAndSelect(bitmap, resolve)
-            }).catch(function () {
-              // ImageCapture 失败 → fallback 到 video+烤帧
-              captureViaVideo(stream).then(function (bitmap) {
-                if (bitmap === null) { resolve(null); return }
-                showOverlayAndSelect(bitmap, resolve)
-              }).catch(function () { resolve(null) })
+            var video = document.createElement('video')
+            video.srcObject = stream
+            video.muted = true
+            video.playsInline = true
+            video.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;'
+            var overlay = document.createElement('div')
+            overlay.id = 'pp-crop-overlay'
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:9997;cursor:crosshair;'
+            overlay.appendChild(video)
+            var sel = document.createElement('div')
+            sel.style.cssText = 'position:absolute;border:2px solid #4f8cff;background:rgba(79,140,255,.15);display:none;pointer-events:none;'
+            overlay.appendChild(sel)
+            var bar = document.createElement('div')
+            bar.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:10px;background:rgba(0,0,0,.7);border-radius:10px;padding:8px 14px;z-index:10;'
+            var btnOk = document.createElement('button')
+            btnOk.textContent = '确定 (Enter)'
+            btnOk.style.cssText = 'border:none;background:#4f8cff;color:#fff;border-radius:8px;padding:6px 16px;font-size:13px;cursor:pointer;font-weight:600;'
+            var btnCancel = document.createElement('button')
+            btnCancel.textContent = '取消 (Esc)'
+            btnCancel.style.cssText = 'border:1px solid #888;background:transparent;color:#eee;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;'
+            bar.appendChild(btnOk)
+            bar.appendChild(btnCancel)
+            overlay.appendChild(bar)
+            document.body.appendChild(overlay)
+            // 烤帧 canvas：替代 video 显示静态图
+            var frameCanvas = null
+            var frameW = 0
+            var frameH = 0
+            var frameReady = false
+            var tracks = stream.getVideoTracks()
+            var track = tracks.length > 0 ? tracks[0] : null
+            var rect = null
+            var dragging = false
+            var startX = 0
+            var startY = 0
+            function viewRect() {
+              var vw = frameReady ? frameW : (video.videoWidth || 1280)
+              var vh = frameReady ? frameH : (video.videoHeight || 720)
+              if (vw <= 0 || vh <= 0) vw = 1280, vh = 720
+              var scale = Math.min(window.innerWidth / vw, window.innerHeight / vh)
+              var dw = vw * scale, dh = vh * scale
+              var left = (window.innerWidth - dw) / 2
+              var top = (window.innerHeight - dh) / 2
+              return { left: left, top: top, width: dw, height: dh, scale: scale, vw: vw, vh: vh }
+            }
+            function onDown(e) {
+              if (!frameReady) return
+              if (e.target !== frameCanvas && e.target !== overlay) return
+              var vr = viewRect()
+              if (vr.vw <= 0 || vr.vh <= 0) return
+              if (e.clientX < vr.left || e.clientX > vr.left + vr.width
+                || e.clientY < vr.top || e.clientY > vr.top + vr.height) return
+              dragging = true
+              startX = e.clientX
+              startY = e.clientY
+              sel.style.display = 'block'
+              sel.style.left = startX + 'px'
+              sel.style.top = startY + 'px'
+              sel.style.width = '0px'
+              sel.style.height = '0px'
+              e.preventDefault()
+            }
+            function onMove(e) {
+              if (!dragging) return
+              var x = Math.min(e.clientX, startX)
+              var y = Math.min(e.clientY, startY)
+              var w = Math.abs(e.clientX - startX)
+              var h = Math.abs(e.clientY - startY)
+              sel.style.left = x + 'px'
+              sel.style.top = y + 'px'
+              sel.style.width = w + 'px'
+              sel.style.height = h + 'px'
+            }
+            function onUp(e) {
+              if (!dragging) return
+              dragging = false
+              var x = Math.min(e.clientX, startX)
+              var y = Math.min(e.clientY, startY)
+              var w = Math.abs(e.clientX - startX)
+              var h = Math.abs(e.clientY - startY)
+              rect = { x: x, y: y, w: w, h: h }
+            }
+            function stopStream() {
+              try { video.pause() } catch (e) {}
+              try { if (track !== null) track.stop() } catch (e) {}
+            }
+            function cleanup() {
+              if (overlay.parentNode !== null) overlay.parentNode.removeChild(overlay)
+              document.removeEventListener('mousemove', onMove)
+              document.removeEventListener('mouseup', onUp)
+              document.removeEventListener('keydown', onKey)
+            }
+            function onKey(e) {
+              if (e.key === 'Escape') {
+                cleanup()
+                stopStream()
+                resolve(null)
+              } else if (e.key === 'Enter') {
+                doCrop()
+              }
+            }
+            function doCrop() {
+              if (rect === null || rect.w < 4 || rect.h < 4) {
+                toast('请先在画面上拖拽框选截图区域')
+                return
+              }
+              var vr = viewRect()
+              var sx = (rect.x - vr.left) / vr.scale
+              var sy = (rect.y - vr.top) / vr.scale
+              var sw = rect.w / vr.scale
+              var sh = rect.h / vr.scale
+              sx = Math.max(0, Math.min(sx, vr.vw))
+              sy = Math.max(0, Math.min(sy, vr.vh))
+              sw = Math.min(sw, vr.vw - sx)
+              sh = Math.min(sh, vr.vh - sy)
+              var out = document.createElement('canvas')
+              out.width = Math.max(1, Math.round(sw))
+              out.height = Math.max(1, Math.round(sh))
+              // 从烤帧 canvas 截（静态，不依赖 stream）
+              out.getContext('2d').drawImage(frameCanvas, sx, sy, sw, sh, 0, 0, out.width, out.height)
+              out.toBlob(function (blob) {
+                cleanup()
+                stopStream()
+                if (blob === null) { toast('截图失败：画布无法导出'); resolve(null); return }
+                resolve({ blob: blob })
+              }, 'image/png')
+            }
+            overlay.addEventListener('mousedown', onDown)
+            document.addEventListener('mousemove', onMove)
+            document.addEventListener('mouseup', onUp)
+            document.addEventListener('keydown', onKey)
+            btnOk.addEventListener('click', doCrop)
+            btnCancel.addEventListener('click', function () {
+              cleanup()
+              stopStream()
+              resolve(null)
             })
 
-            function captureOnce(strm) {
-              return new Promise(function (res, rej) {
-                var tracks = strm.getVideoTracks()
-                if (tracks.length === 0) { rej(new Error('no video track')); return }
-                var track = tracks[0]
-                if (typeof ImageCapture === 'undefined') { rej(new Error('ImageCapture unsupported')); return }
-                try {
-                  var ic = new ImageCapture(track)
-                  ic.grabFrame().then(function (b) {
-                    try { track.stop() } catch (e2) {}
-                    res(b)
-                  }).catch(rej)
-                } catch (e) { rej(e) }
-              })
+            // 烤帧：拿到首帧 → 画到 frameCanvas → 覆盖 video → 暂停 video
+            // track 不停 —— 保持 DSH 焦点（避免截到剪映等非 DSH 内容）
+            function bakeFrame() {
+              var vw = video.videoWidth
+              var vh = video.videoHeight
+              if (vw <= 0 || vh <= 0) {
+                setTimeout(bakeFrame, 50)
+                return
+              }
+              frameW = vw
+              frameH = vh
+              frameCanvas = document.createElement('canvas')
+              frameCanvas.width = vw
+              frameCanvas.height = vh
+              frameCanvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;'
+              frameCanvas.getContext('2d').drawImage(video, 0, 0)
+              overlay.insertBefore(frameCanvas, video)
+              try { video.pause() } catch (e) {}
+              frameReady = true
             }
-
-            function captureViaVideo(strm) {
-              return new Promise(function (res, rej) {
-                var tracks = strm.getVideoTracks()
-                if (tracks.length === 0) { rej(new Error('no video track')); return }
-                var track = tracks[0]
-                var video = document.createElement('video')
-                video.srcObject = strm
-                video.muted = true
-                video.playsInline = true
-                var done = false
-                function finish() {
-                  if (done) return
-                  done = true
-                  try {
-                    var vw = video.videoWidth, vh = video.videoHeight
-                    if (vw <= 0 || vh <= 0) { rej(new Error('no frame')); return }
-                    var canvas = document.createElement('canvas')
-                    canvas.width = vw
-                    canvas.height = vh
-                    canvas.getContext('2d').drawImage(video, 0, 0)
-                    try { video.pause() } catch (e2) {}
-                    try { video.srcObject = null } catch (e2) {}
-                    try { track.stop() } catch (e2) {}
-                    res(canvas)
-                  } catch (e) { rej(e) }
-                }
-                video.onloadedmetadata = function () {
-                  video.play().then(function () {
-                    return new Promise(function (r) { requestAnimationFrame(function () { r() }) })
-                  }).then(finish).catch(finish)
-                }
-                if (video.readyState >= 1) {
-                  try {
-                    video.play().then(function () {
-                      return new Promise(function (r) { requestAnimationFrame(function () { r() }) })
-                    }).then(finish).catch(finish)
-                  } catch (e) { finish() }
-                }
-                setTimeout(finish, 3000)
-              })
+            video.onloadedmetadata = function () {
+              video.play().then(function () {
+                return new Promise(function (res) { requestAnimationFrame(function () { res() }) })
+              }).then(bakeFrame).catch(bakeFrame)
             }
-
-            function showOverlayAndSelect(bitmap, resolveOuter) {
-              var bw = 0, bh = 0, srcCanvas
-              if (bitmap instanceof HTMLCanvasElement) {
-                bw = bitmap.width
-                bh = bitmap.height
-                srcCanvas = bitmap
-              } else {
-                bw = bitmap.width
-                bh = bitmap.height
-                srcCanvas = document.createElement('canvas')
-                srcCanvas.width = bw
-                srcCanvas.height = bh
-                srcCanvas.getContext('2d').drawImage(bitmap, 0, 0)
-              }
-              var view = document.createElement('canvas')
-              view.width = bw
-              view.height = bh
-              view.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;'
-              view.getContext('2d').drawImage(srcCanvas, 0, 0)
-              var overlay = document.createElement('div')
-              overlay.id = 'pp-crop-overlay'
-              overlay.style.cssText = 'position:fixed;inset:0;z-index:9997;cursor:crosshair;'
-              overlay.appendChild(view)
-              var sel = document.createElement('div')
-              sel.style.cssText = 'position:absolute;border:2px solid #4f8cff;background:rgba(79,140,255,.15);display:none;pointer-events:none;'
-              overlay.appendChild(sel)
-              var bar = document.createElement('div')
-              bar.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:10px;background:rgba(0,0,0,.7);border-radius:10px;padding:8px 14px;z-index:10;'
-              var btnOk = document.createElement('button')
-              btnOk.textContent = '确定 (Enter)'
-              btnOk.style.cssText = 'border:none;background:#4f8cff;color:#fff;border-radius:8px;padding:6px 16px;font-size:13px;cursor:pointer;font-weight:600;'
-              var btnCancel = document.createElement('button')
-              btnCancel.textContent = '取消 (Esc)'
-              btnCancel.style.cssText = 'border:1px solid #888;background:transparent;color:#eee;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;'
-              bar.appendChild(btnOk)
-              bar.appendChild(btnCancel)
-              overlay.appendChild(bar)
-              document.body.appendChild(overlay)
-              var rect = null, dragging = false, startX = 0, startY = 0
-              function viewRect() {
-                var scale = Math.min(window.innerWidth / bw, window.innerHeight / bh)
-                var dw = bw * scale, dh = bh * scale
-                var left = (window.innerWidth - dw) / 2
-                var top = (window.innerHeight - dh) / 2
-                return { left: left, top: top, width: dw, height: dh, scale: scale, vw: bw, vh: bh }
-              }
-              function onDown(e) {
-                if (e.target !== view && e.target !== overlay) return
-                var vr = viewRect()
-                if (vr.vw <= 0 || vr.vh <= 0) return
-                if (e.clientX < vr.left || e.clientX > vr.left + vr.width
-                  || e.clientY < vr.top || e.clientY > vr.top + vr.height) return
-                dragging = true
-                startX = e.clientX
-                startY = e.clientY
-                sel.style.display = 'block'
-                sel.style.left = startX + 'px'
-                sel.style.top = startY + 'px'
-                sel.style.width = '0px'
-                sel.style.height = '0px'
-                e.preventDefault()
-              }
-              function onMove(e) {
-                if (!dragging) return
-                var x = Math.min(e.clientX, startX)
-                var y = Math.min(e.clientY, startY)
-                var w = Math.abs(e.clientX - startX)
-                var h = Math.abs(e.clientY - startY)
-                sel.style.left = x + 'px'
-                sel.style.top = y + 'px'
-                sel.style.width = w + 'px'
-                sel.style.height = h + 'px'
-              }
-              function onUp(e) {
-                if (!dragging) return
-                dragging = false
-                var x = Math.min(e.clientX, startX)
-                var y = Math.min(e.clientY, startY)
-                var w = Math.abs(e.clientX - startX)
-                var h = Math.abs(e.clientY - startY)
-                rect = { x: x, y: y, w: w, h: h }
-              }
-              function cleanup() {
-                if (overlay.parentNode !== null) overlay.parentNode.removeChild(overlay)
-                document.removeEventListener('mousemove', onMove)
-                document.removeEventListener('mouseup', onUp)
-                document.removeEventListener('keydown', onKey)
-              }
-              function onKey(e) {
-                if (e.key === 'Escape') { cleanup(); resolveOuter(null) }
-                else if (e.key === 'Enter') { doCrop() }
-              }
-              function doCrop() {
-                if (rect === null || rect.w < 4 || rect.h < 4) {
-                  toast('请先在画面上拖拽框选截图区域')
-                  return
-                }
-                var vr = viewRect()
-                var sx = (rect.x - vr.left) / vr.scale
-                var sy = (rect.y - vr.top) / vr.scale
-                var sw = rect.w / vr.scale
-                var sh = rect.h / vr.scale
-                sx = Math.max(0, Math.min(sx, vr.vw))
-                sy = Math.max(0, Math.min(sy, vr.vh))
-                sw = Math.min(sw, vr.vw - sx)
-                sh = Math.min(sh, vr.vh - sy)
-                var out = document.createElement('canvas')
-                out.width = Math.max(1, Math.round(sw))
-                out.height = Math.max(1, Math.round(sh))
-                out.getContext('2d').drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, out.width, out.height)
-                out.toBlob(function (blob) {
-                  cleanup()
-                  if (blob === null) { toast('截图失败：画布无法导出'); resolveOuter(null); return }
-                  resolveOuter({ blob: blob })
-                }, 'image/png')
-              }
-              overlay.addEventListener('mousedown', onDown)
-              document.addEventListener('mousemove', onMove)
-              document.addEventListener('mouseup', onUp)
-              document.addEventListener('keydown', onKey)
-              btnOk.addEventListener('click', doCrop)
-              btnCancel.addEventListener('click', function () { cleanup(); resolveOuter(null) })
+            if (video.readyState >= 1) {
+              try {
+                video.play().then(function () {
+                  return new Promise(function (res) { requestAnimationFrame(function () { res() }) })
+                }).then(bakeFrame).catch(bakeFrame)
+              } catch (e) { bakeFrame() }
             }
           })
         }
