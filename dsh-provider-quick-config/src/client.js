@@ -889,25 +889,26 @@ window.__ModuleLoader__.load({
           setBusy(true)
           var stream
           try {
-            // 关键约束组合：
-            // 1. selfBrowserSurface: 'include' (Chrome 124+) — 让系统选择器强制包含当前浏览器，
-            //    避免某些平台/扩展把 capture 路由到非当前浏览器窗口
-            // 2. systemAudio: 'exclude' — 静音
-            // 3. displaySurface: 'monitor' — 强制要求"整个屏幕"标签置顶
-            // 4. CaptureController.setFocusBehavior('no-focus-change') (Chrome 109+) —
-            //    关键：防止 getDisplayMedia 调用后焦点跳到其他应用 / 标签页，
-            //    stream 仍然显示当前浏览器所在的屏幕内容（而不是焦点所在的屏幕）
+            // 关键约束组合 —— 强制截取当前浏览器 tab：
+            // 1. displaySurface: 'browser' (Chrome) — 系统选择器只列出浏览器选项（标签 + 窗口）
+            // 2. selfBrowserSurface: 'include' (Chrome 124+) — 强制包含当前浏览器，不被排除
+            // 3. preferCurrentTab: true (Chrome 94+) — 把"当前标签"选项置顶
+            // 4. monitorTypeSurfaces: 'exclude' (Chrome 124+) — 从选择器移除"整个屏幕"选项，
+            //    强制用户选浏览器 tab（避免 macOS 焦点在选完时跳到其他应用）
+            // 5. systemAudio: 'exclude' — 静音
+            // 6. CaptureController.setFocusBehavior('no-focus-change') (Chrome 109+) —
+            //    即使焦点被抢也把焦点拉回 capturing app
             // 浏览器不支持的字段静默跳过，最终回退到 { video: true }。
             var dsmConstraints = { video: true }
             try {
               var probe = navigator.mediaDevices.getSupportedConstraints()
               var videoC = {}
               if (probe !== undefined) {
-                if (probe.displaySurface === true) videoC.displaySurface = 'monitor'
-                if (probe.frameRate === true) videoC.frameRate = { ideal: 15, max: 30 }
-                if (probe.width === true) videoC.width = { ideal: 1920 }
-                if (probe.height === true) videoC.height = { ideal: 1080 }
+                if (probe.displaySurface === true) videoC.displaySurface = 'browser'
                 if (probe.selfBrowserSurface === true) videoC.selfBrowserSurface = 'include'
+                if (probe.preferCurrentTab === true) videoC.preferCurrentTab = true
+                if (probe.monitorTypeSurfaces === true) videoC.monitorTypeSurfaces = 'exclude'
+                if (probe.frameRate === true) videoC.frameRate = { ideal: 15, max: 30 }
               }
               if (Object.keys(videoC).length > 0) {
                 videoC.systemAudio = 'exclude'
