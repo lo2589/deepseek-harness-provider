@@ -889,9 +889,28 @@ window.__ModuleLoader__.load({
           setBusy(true)
           var stream
           try {
+            // 关键：displaySurface 显式声明，避免某些 macOS 窗口管理工具把 stream 路由到
+            // 它们的"窗口缩略图合成层"（"瀑布"——多个窗口快照叠加）。同时限定 15fps
+            // 减少合成器端多帧重采样造成的拖影。
+            // 浏览器不支持 displaySurface 时静默回退到 { video: true }。
+            var dsmConstraints = { video: true }
+            try {
+              var probe = navigator.mediaDevices.getSupportedConstraints()
+              if (probe !== undefined && probe.displaySurface === true) {
+                dsmConstraints = {
+                  video: {
+                    displaySurface: 'monitor',
+                    frameRate: { ideal: 15, max: 30 },
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 },
+                  },
+                  audio: false,
+                }
+              }
+            } catch (e) { /* probe best-effort */ }
             // 超时保护：部分浏览器在非用户激活上下文会静默挂起
             stream = await Promise.race([
-              navigator.mediaDevices.getDisplayMedia({ video: true }),
+              navigator.mediaDevices.getDisplayMedia(dsmConstraints),
               new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout: getDisplayMedia')) }, 15000) }),
             ])
           } catch (e) {
