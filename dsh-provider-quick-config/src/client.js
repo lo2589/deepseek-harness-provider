@@ -1094,7 +1094,23 @@ window.__ModuleLoader__.load({
             document.addEventListener('keydown', onKey)
             btnOk.addEventListener('click', doCrop)
             btnCancel.addEventListener('click', function () { cleanup(); resolve(null) })
-            video.play().catch(function () { /* preview best-effort */ })
+            // 关键修复：只取一帧后立即暂停，避免边截图边 play 造成拖框时画面在动（"瀑布"）。
+            // 用户拖框时画面必须静止，选区坐标才能稳定对应到烤帧的内容。
+            // 烤帧逻辑：等 onloadedmetadata（确保 videoWidth/Height 有值）→ play() 拿到首帧
+            // → 等一帧 RAF 让浏览器把帧画上 → pause() 冻结 → 后续 doCrop() 直接 drawImage(video, ...) 截那一帧。
+            function freezeFrame() {
+              video.play().then(function () {
+                // 等下一帧渲染完，确保 video 元素上已经画出像素，再暂停
+                return new Promise(function (res) { requestAnimationFrame(function () { res() }) })
+              }).then(function () {
+                try { video.pause() } catch (e2) { /* pause best-effort */ }
+              }).catch(function () { /* play can fail in some browsers; crop still works because video element auto-shows first frame */ })
+            }
+            video.onloadedmetadata = freezeFrame
+            // 部分浏览器 metadata 已就绪但 onloadedmetadata 没 fire（缓存命中）：强制尝试一次
+            if (video.readyState >= 1) {
+              try { freezeFrame() } catch (e) { /* best-effort */ }
+            }
           })
         }
         return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框（顺带存入 .screenshots/）',
