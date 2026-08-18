@@ -1020,9 +1020,17 @@ window.__ModuleLoader__.load({
             var dragging = false
             var startX = 0
             var startY = 0
+            // 烤帧 canvas：替代 video 显示预览。frameCanvas 一旦就绪，video 立即暂停
+            // 并解绑 srcObject —— stream 不再渲染，画面彻底静止，"上一帧"再也不会进来。
+            var frameCanvas = null
+            var frameW = 0
+            var frameH = 0
+            var frameReady = false
             function videoRect() {
-              var vw = video.videoWidth || 1280
-              var vh = video.videoHeight || 720
+              // 烤帧完成后用 frameCanvas 的尺寸（video 已被 frameCanvas 覆盖，原尺寸不再可靠）
+              var vw = frameReady ? frameW : (video.videoWidth || 1280)
+              var vh = frameReady ? frameH : (video.videoHeight || 720)
+              if (vw <= 0 || vh <= 0) vw = 1280, vh = 720
               var scale = Math.min(window.innerWidth / vw, window.innerHeight / vh)
               var dw = vw * scale
               var dh = vh * scale
@@ -1031,8 +1039,10 @@ window.__ModuleLoader__.load({
               return { left: left, top: top, width: dw, height: dh, scale: scale, vw: vw, vh: vh }
             }
             function onDown(e) {
+              // 烤帧未完成前不响应拖框（避免在动态视频帧上拖框导致坐标错位）
+              if (!frameReady) return
               // 点按钮/取消条不算拖拽
-              if (e.target !== video && e.target !== overlay) return
+              if (e.target !== frameCanvas && e.target !== overlay) return
               var vr = videoRect()
               if (vr.vw <= 0 || vr.vh <= 0) return
               if (e.clientX < vr.left || e.clientX > vr.left + vr.width
@@ -1073,6 +1083,7 @@ window.__ModuleLoader__.load({
               document.removeEventListener('mouseup', onUp)
               document.removeEventListener('keydown', onKey)
               try { video.pause() } catch (e2) {}
+              try { video.srcObject = null } catch (e2) {}
             }
             function onKey(e) {
               if (e.key === 'Escape') {
@@ -1100,7 +1111,8 @@ window.__ModuleLoader__.load({
               sh = Math.min(sh, vr.vh - sy)
               canvas.width = Math.max(1, Math.round(sw))
               canvas.height = Math.max(1, Math.round(sh))
-              canvas.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
+              // 从烤帧 canvas（静态）裁，不再从 video（动态）裁
+              canvas.getContext('2d').drawImage(frameCanvas, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
               canvas.toBlob(function (blob) {
                 cleanup()
                 if (blob === null) { toast('截图失败：画布无法导出'); resolve(null); return }
@@ -1113,7 +1125,45 @@ window.__ModuleLoader__.load({
             document.addEventListener('keydown', onKey)
             btnOk.addEventListener('click', doCrop)
             btnCancel.addEventListener('click', function () { cleanup(); resolve(null) })
-            video.play().catch(function () { /* preview best-effort */ })
+            // 烤帧：拿到首帧 → 画到 frameCanvas → 插入 overlay 覆盖 video → 暂停 video
+            // 并解绑 srcObject，stream 立即停止渲染。烤帧前用户拖框会被 onDown 拦截。
+            function bakeFrame() {
+              var vw = video.videoWidth
+              var vh = video.videoHeight
+              if (vw <= 0 || vh <= 0) {
+                // 视频还没准备好 — 50ms 后再试
+                setTimeout(bakeFrame, 50)
+                return
+              }
+              frameW = vw
+              frameH = vh
+              frameCanvas = document.createElement('canvas')
+              frameCanvas.width = vw
+              frameCanvas.height = vh
+              frameCanvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;'
+              frameCanvas.getContext('2d').drawImage(video, 0, 0)
+              // frameCanvas 插入到 video 之前，z-order 上覆盖 video
+              overlay.insertBefore(frameCanvas, video)
+              // 暂停 + 解绑 stream → 画面从此静止
+              try { video.pause() } catch (e2) { /* best-effort */ }
+              try { video.srcObject = null } catch (e2) { /* best-effort */ }
+              frameReady = true
+            }
+            // 启动：拿到 1 帧就烤
+            video.onloadedmetadata = function () {
+              video.play().then(function () {
+                // 等下一帧渲染，确保像素已经画到 video 元素
+                return new Promise(function (res) { requestAnimationFrame(function () { res() }) })
+              }).then(bakeFrame).catch(bakeFrame)
+            }
+            if (video.readyState >= 1) {
+              // 缓存命中：metadata 已就绪但 onloadedmetadata 可能不 fire
+              try {
+                video.play().then(function () {
+                  return new Promise(function (res) { requestAnimationFrame(function () { res() }) })
+                }).then(bakeFrame).catch(bakeFrame)
+              } catch (e) { bakeFrame() }
+            }
           })
         }
         return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框（顺带存入 .screenshots/）',
