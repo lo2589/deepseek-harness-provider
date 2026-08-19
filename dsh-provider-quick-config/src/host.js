@@ -415,6 +415,7 @@ module.exports = {
           } else {
             byPath.set(resolved.path, Object.assign({
               firstTurn: entry.turn,
+              turn: entry.turn,
               turns: [entry.turn],
             }, resolved))
           }
@@ -456,6 +457,7 @@ module.exports = {
                 kind: mediaKind(ext),
                 size: size,
                 firstTurn: screenshotTurn,
+                turn: screenshotTurn,
                 turns: [screenshotTurn],
                 source: 'screenshot',
               })
@@ -488,6 +490,7 @@ module.exports = {
                 kind: mediaKind(ext),
                 size: size,
                 firstTurn: uploadTurn,
+                turn: uploadTurn,
                 turns: [uploadTurn],
                 source: 'upload',
               })
@@ -529,6 +532,7 @@ module.exports = {
                   kind: mediaKind(ext),
                   size: size,
                   firstTurn: workspaceTurn,
+                  turn: workspaceTurn,
                   turns: [workspaceTurn],
                   source: 'workspace',
                 })

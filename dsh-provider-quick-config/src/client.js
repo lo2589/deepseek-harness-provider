@@ -769,6 +769,10 @@ window.__ModuleLoader__.load({
 
       function ScreenshotButton(props) {
         var s = useStore()
+        // 把 input.right slot 提供的 inputActions 同步给展示台面板用
+        if (props.inputActions !== undefined && store.showcaseInputActions !== props.inputActions) {
+          setState({ showcaseInputActions: props.inputActions })
+        }
         var busyState = React.useState(false)
         var busy = busyState[0]
         var setBusy = busyState[1]
@@ -881,12 +885,24 @@ window.__ModuleLoader__.load({
         async function shoot(s) {
           // 1. 优先尝试 native 截图路由（host 进程调 macOS screencapture）
           //    macOS 系统级区域选择器，不走浏览器、不抢焦点、不会瀑布、不会截到非 DSH 页面
-          //    client 不主动找 session id —— 让 host 自己查当前活跃 session（自动从 sidebar 第一个）
+          //    从 sidebar 拿当前 active session id
+          var activeSid = null
+          if (s !== null && s !== undefined && s.showcaseSession !== null && s.showcaseSession !== undefined) {
+            activeSid = s.showcaseSession
+          } else {
+            try {
+              var selected = document.querySelector('.g6lbZq_sessionRow.g6lbZq_selected')
+              if (selected !== null) {
+                var idAttr = selected.getAttribute('data-session-id') || selected.getAttribute('data-id')
+                if (idAttr !== null) activeSid = idAttr
+              }
+            } catch (e) { /* DOM 读取失败 */ }
+          }
           try {
             if (typeof fetch !== 'undefined') {
               setBusy(true)
               toast('正在请求系统截图… macOS 应弹出原生区域选择器')
-              var nativeRes = await fetch(MEDIA_ROUTE + '/native-screenshot', {
+              var nativeRes = await fetch(MEDIA_ROUTE + '/native-screenshot' + (activeSid !== null ? '?session=' + encodeURIComponent(activeSid) : ''), {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ mode: 'region' }),
@@ -1075,7 +1091,7 @@ window.__ModuleLoader__.load({
             video.srcObject = stream
             video.muted = true
             video.playsInline = true
-            video.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;'
+            video.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;pointer-events:none;'
             var overlay = document.createElement('div')
             overlay.id = 'pp-crop-overlay'
             overlay.style.cssText = 'position:fixed;inset:0;z-index:9997;cursor:crosshair;'
@@ -1084,9 +1100,9 @@ window.__ModuleLoader__.load({
             sel.style.cssText = 'position:absolute;border:2px solid #4f8cff;background:rgba(79,140,255,.15);display:none;pointer-events:none;'
             overlay.appendChild(sel)
             var bar = document.createElement('div')
-            bar.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:10px;background:rgba(0,0,0,.7);border-radius:10px;padding:8px 14px;z-index:10;'
+            bar.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:10px;background:rgba(0,0,0,.7);border-radius:10px;padding:8px 14px;z-index:10;pointer-events:auto;'
             var btnOk = document.createElement('button')
-            btnOk.textContent = '确定 (Enter)'
+            btnOk.textContent = '确定 (Enter 全屏 / 框选后截取)'
             btnOk.style.cssText = 'border:none;background:#4f8cff;color:#fff;border-radius:8px;padding:6px 16px;font-size:13px;cursor:pointer;font-weight:600;'
             var btnCancel = document.createElement('button')
             btnCancel.textContent = '取消 (Esc)'
@@ -1118,12 +1134,14 @@ window.__ModuleLoader__.load({
             }
             function onDown(e) {
               if (!frameReady) return
-              // 接受 frameCanvas / overlay / video 任意一个（mousedown 落在 video 区域时 e.target === video）
-              if (e.target !== frameCanvas && e.target !== overlay && e.target !== video) return
+              // overlay 统一接收鼠标事件；bar 及其按钮有 pointer-events:auto，
+              // 点击按钮时不应开始拖拽。
+              if (bar !== null && (e.target === bar || bar.contains(e.target))) return
               var vr = viewRect()
               if (vr.vw <= 0 || vr.vh <= 0) return
-              if (e.clientX < vr.left || e.clientX > vr.left + vr.width
-                || e.clientY < vr.top || e.clientY > vr.top + vr.height) return
+              // 允许在全屏 overlay 上拖拽（含黑边），只在明显超出窗口时阻止
+              if (e.clientX < 0 || e.clientX > window.innerWidth
+                || e.clientY < 0 || e.clientY > window.innerHeight) return
               dragging = true
               startX = e.clientX
               startY = e.clientY
@@ -1174,19 +1192,25 @@ window.__ModuleLoader__.load({
               }
             }
             function doCrop() {
+              var vr = viewRect()
+              var sx, sy, sw, sh
               if (rect === null || rect.w < 4 || rect.h < 4) {
-                toast('请先在画面上拖拽框选截图区域')
+                // 未框选或选区太小：截取整个画面
+                sx = 0; sy = 0; sw = vr.vw; sh = vr.vh
+              } else {
+                sx = (rect.x - vr.left) / vr.scale
+                sy = (rect.y - vr.top) / vr.scale
+                sw = rect.w / vr.scale
+                sh = rect.h / vr.scale
+                sx = Math.max(0, Math.min(sx, vr.vw))
+                sy = Math.max(0, Math.min(sy, vr.vh))
+                sw = Math.min(sw, vr.vw - sx)
+                sh = Math.min(sh, vr.vh - sy)
+              }
+              if (sw <= 0 || sh <= 0) {
+                toast('截图区域无效')
                 return
               }
-              var vr = viewRect()
-              var sx = (rect.x - vr.left) / vr.scale
-              var sy = (rect.y - vr.top) / vr.scale
-              var sw = rect.w / vr.scale
-              var sh = rect.h / vr.scale
-              sx = Math.max(0, Math.min(sx, vr.vw))
-              sy = Math.max(0, Math.min(sy, vr.vh))
-              sw = Math.min(sw, vr.vw - sx)
-              sh = Math.min(sh, vr.vh - sy)
               var out = document.createElement('canvas')
               out.width = Math.max(1, Math.round(sw))
               out.height = Math.max(1, Math.round(sh))
@@ -1224,7 +1248,7 @@ window.__ModuleLoader__.load({
               frameCanvas = document.createElement('canvas')
               frameCanvas.width = vw
               frameCanvas.height = vh
-              frameCanvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;'
+              frameCanvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;pointer-events:none;'
               frameCanvas.getContext('2d').drawImage(video, 0, 0)
               overlay.insertBefore(frameCanvas, video)
               try { video.pause() } catch (e) {}
@@ -1244,7 +1268,7 @@ window.__ModuleLoader__.load({
             }
           })
         }
-        return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框（顺带存入 .screenshots/）',
+        return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框（框选或直接 Enter 全屏；顺带存入 .screenshots/）',
           'aria-label': '截图', onClick: function () { shoot(s) } },
           h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, 'aria-hidden': true },
             h('path', { d: 'M3 4.5h2l1-1.5h4l1 1.5h2a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V6A1.5 1.5 0 0 1 3 4.5Zm5 6.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z', fill: 'currentColor' })))
@@ -1569,7 +1593,7 @@ window.__ModuleLoader__.load({
           setState({ showcaseError: '当前环境不支持插入文本（未拿到 inputActions）' })
         }
         function doInsert(item) {
-          // 仅图片：通过 fetch 拿 blob → createDraftImages → 加入草稿
+          // 仅图片：通过 fetch 拿 blob → createDraftImages → addImages 加入草稿
           if (item.kind !== 'image') return
           fetch(mediaUrl(s.showcaseSession, item.path)).then(function (res) {
             if (!res.ok) throw new Error('HTTP ' + res.status)
@@ -1581,7 +1605,19 @@ window.__ModuleLoader__.load({
               return
             }
             var file = new File([blob], item.name, { type: blob.type || 'application/octet-stream' })
-            var ids = conv.createDraftImages([file])
+            var images = conv.createDraftImages([file])
+            if (images.length === 0) {
+              setState({ showcaseError: '插入图片失败：createDraftImages 返回空' })
+              return
+            }
+            var ia = store.showcaseInputActions
+            if (ia !== null && typeof ia.addImages === 'function') {
+              if (!ia.addImages(images.map(function (i) { return i.id }))) {
+                if (typeof conv.releaseDraftImages === 'function') conv.releaseDraftImages(images)
+                setState({ showcaseError: '插入图片失败：addImages 拒绝' })
+                return
+              }
+            }
             setState({ showcaseError: null })
           }).catch(function (e) {
             setState({ showcaseError: messageOf(e) })
