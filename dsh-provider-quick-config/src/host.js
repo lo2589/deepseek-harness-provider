@@ -744,17 +744,11 @@ module.exports = {
       // 完全绕过浏览器的 getDisplayMedia（避免 macOS 焦点跳选、瀑布拖影、要求
       // 屏幕录制权限等问题）。Linux/Windows 没有 screencapture，返回 503 让 client
       // 回退到 getDisplayMedia。
+      // 可选 ?session=<id> 显式指定 session；不传则查找当前 active session。
       const nativeShotDisposer = server.register({
         kind: 'exact',
         path: '/plugins/provider-quick-config/native-screenshot',
         handler: async (req, res) => {
-          const q = queryOf(req.url)
-          const sid = q.session || ''
-          if (sid === '') {
-            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
-            res.end(JSON.stringify({ error: 'missing session' }))
-            return
-          }
           // 解析 mode：region（默认）/ window / full
           let mode = 'region'
           let bodyBuf = ''
@@ -775,17 +769,47 @@ module.exports = {
             res.end(JSON.stringify({ error: 'native-screenshot only available on macOS' }))
             return
           }
-          // 查会话 cwd
+          // 解析当前 active session：1) client 显式传 sid 2) host 查最近一个 session
+          const q = queryOf(req.url)
+          let sid = q.session || ''
           let cwd = undefined
+          let resolvedSid = ''
           const sq = ctx.get('sessionQuery')
-          if (sq !== undefined && typeof sq.readSession === 'function') {
-            const snap = await sq.readSession(sid)
-            if (snap !== undefined && snap !== null && snap.session !== undefined && snap.session !== null
-              && typeof snap.session.cwd === 'string') cwd = snap.session.cwd
+          async function tryResolveCwd(sessionId) {
+            if (sq === undefined || typeof sq.readSession !== 'function') return undefined
+            try {
+              const snap = await sq.readSession(sessionId)
+              if (snap !== undefined && snap !== null && snap.session !== undefined && snap.session !== null
+                && typeof snap.session.cwd === 'string') return snap.session.cwd
+            } catch (e) { /* fall through */ }
+            return undefined
+          }
+          if (sid !== '') {
+            cwd = await tryResolveCwd(sid)
+            resolvedSid = sid
+          } else {
+            // 列举最近 session，挑第一个有 cwd 的
+            if (sq !== undefined && typeof sq.listSessions === 'function') {
+              try {
+                const list = await sq.listSessions({})
+                if (Array.isArray(list)) {
+                  for (const item of list) {
+                    const tryId = (item !== null && typeof item === 'object' && typeof item.id === 'string') ? item.id : ''
+                    if (tryId === '') continue
+                    const tryCwd = await tryResolveCwd(tryId)
+                    if (tryCwd !== undefined) {
+                      cwd = tryCwd
+                      resolvedSid = tryId
+                      break
+                    }
+                  }
+                }
+              } catch (e) { /* ignore */ }
+            }
           }
           if (cwd === undefined) {
-            res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' })
-            res.end(JSON.stringify({ error: 'session cwd unknown' }))
+            res.writeHead(409, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'no active session (请先在 DSH GUI 中发一条消息创建会话)' }))
             return
           }
           // 准备 .screenshots/ 目录
@@ -858,7 +882,7 @@ module.exports = {
             return
           }
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ path: target, name: 'screenshot-' + stamp + '.png' }))
+          res.end(JSON.stringify({ path: target, name: 'screenshot-' + stamp + '.png', session: resolvedSid }))
         },
       })
       // Reveal 文件路由：在系统文件管理器中高亮显示指定文件（macOS: open -R / Windows: explorer /select / Linux: xdg-open <dir>）

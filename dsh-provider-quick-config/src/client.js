@@ -881,11 +881,12 @@ window.__ModuleLoader__.load({
         async function shoot(s) {
           // 1. 优先尝试 native 截图路由（host 进程调 macOS screencapture）
           //    macOS 系统级区域选择器，不走浏览器、不抢焦点、不会瀑布、不会截到非 DSH 页面
+          //    client 不主动找 session id —— 让 host 自己查当前活跃 session（自动从 sidebar 第一个）
           try {
-            if (typeof fetch !== 'undefined' && s !== null && s !== undefined && s.showcaseSession !== null && s.showcaseSession !== undefined) {
+            if (typeof fetch !== 'undefined') {
               setBusy(true)
               toast('正在请求系统截图… macOS 应弹出原生区域选择器')
-              var nativeRes = await fetch(MEDIA_ROUTE + '/native-screenshot?session=' + encodeURIComponent(s.showcaseSession), {
+              var nativeRes = await fetch(MEDIA_ROUTE + '/native-screenshot', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ mode: 'region' }),
@@ -895,9 +896,12 @@ window.__ModuleLoader__.load({
                 if (nativeBody !== null && nativeBody.path !== undefined) {
                   // 成功：图片由 host 写入 <session cwd>/.screenshots/
                   // 调 loadShowcase 刷新媒体展示台
+                  var savedSid = (nativeBody !== null && typeof nativeBody.session === 'string') ? nativeBody.session : null
                   setState({ showcaseError: null })
-                  setShowcase(true, s.showcaseSession)
-                  void loadShowcase(s.showcaseSession)
+                  if (savedSid !== null) {
+                    setShowcase(true, savedSid)
+                    void loadShowcase(savedSid)
+                  }
                   toast('截图已存入多媒体库：' + nativeBody.path)
                   setBusy(false)
                   return
@@ -905,6 +909,11 @@ window.__ModuleLoader__.load({
               } else if (nativeRes.status === 204) {
                 // 用户取消（按 Esc / 选窗口超时）
                 toast('已取消截图')
+                setBusy(false)
+                return
+              } else if (nativeRes.status === 409) {
+                // 没有任何 active session —— 提示用户
+                toast('没有活跃会话，请先在 DSH 中发一条消息再截（截图要保存到会话目录）')
                 setBusy(false)
                 return
               } else if (nativeRes.status === 503) {
