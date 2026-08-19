@@ -1118,7 +1118,8 @@ window.__ModuleLoader__.load({
             }
             function onDown(e) {
               if (!frameReady) return
-              if (e.target !== frameCanvas && e.target !== overlay) return
+              // 接受 frameCanvas / overlay / video 任意一个（mousedown 落在 video 区域时 e.target === video）
+              if (e.target !== frameCanvas && e.target !== overlay && e.target !== video) return
               var vr = viewRect()
               if (vr.vw <= 0 || vr.vh <= 0) return
               if (e.clientX < vr.left || e.clientX > vr.left + vr.width
@@ -1500,7 +1501,7 @@ window.__ModuleLoader__.load({
             h('span', { className: 'sc-msize' }, fmtSize(item.size))),
           h('div', { className: 'sc-item-actions' },
             // 所有类型都能插入路径文本到输入框
-            h('button', { type: 'button', className: 'sc-insert', disabled: !insertable,
+            h('button', { type: 'button', className: 'sc-insert',
                 onClick: (e) => { e.stopPropagation(); if (props.onInsertPath !== undefined) props.onInsertPath(item) } },
               '插入路径'),
             // 图片额外支持插入附件
@@ -1546,12 +1547,26 @@ window.__ModuleLoader__.load({
         function doInsertPath(item) {
           // 所有类型：插入路径文本到输入框（对话提到它 → 展示台闭环）
           var ia = store.showcaseInputActions
-          if (ia === null || typeof ia.setDraft !== 'function') {
-            setState({ showcaseError: '当前环境不支持插入文本' })
+          if (ia !== null && typeof ia.setDraft === 'function') {
+            ia.setDraft(item.path)
+            setState({ showcaseError: null })
             return
           }
-          ia.setDraft(item.path)
-          setState({ showcaseError: null })
+          // 兜底：通过 ctx.conversation 拿当前会话的 inputActions
+          try {
+            var conv = ctx.get('conversation')
+            if (conv !== undefined && typeof conv.setDraft === 'function') {
+              conv.setDraft(item.path)
+              setState({ showcaseError: null })
+              return
+            }
+            if (conv !== undefined && typeof conv.writeDraft === 'function') {
+              conv.writeDraft(item.path)
+              setState({ showcaseError: null })
+              return
+            }
+          } catch (e) { /* fall through */ }
+          setState({ showcaseError: '当前环境不支持插入文本（未拿到 inputActions）' })
         }
         function doInsert(item) {
           // 仅图片：通过 fetch 拿 blob → createDraftImages → 加入草稿

@@ -494,6 +494,49 @@ module.exports = {
             }
           }
         } catch (e) { /* .uploads scan best-effort */ }
+        // 完整 cwd 递归扫描 4 层（覆盖历史中所有多媒体文件）
+        // 用户期望的"历史中出现的所有多媒体信息"——不再只扫 .screenshots/.uploads
+        try {
+          const nodeFs = require('node:fs')
+          const nodePath = require('node:path')
+          // cwd 整体扫描轮 = maxTurn + 3
+          const workspaceTurn = maxTurn + 3
+          function scanDirRec(dir, depth) {
+            if (depth > 3) return
+            let entries
+            try { entries = nodeFs.readdirSync(dir, { withFileTypes: true }) } catch (e) { return }
+            for (const f of entries) {
+              if (f.name.startsWith('.')) continue
+              const full = nodePath.join(dir, f.name)
+              if (f.isDirectory()) {
+                // 跳过 node_modules / .git / dist / build 等大目录
+                if (f.name === 'node_modules' || f.name === '.git' || f.name === 'dist' || f.name === 'build' || f.name === '.next') continue
+                scanDirRec(full, depth + 1)
+              } else if (f.isFile()) {
+                const lower = f.name.toLowerCase()
+                if (!/\.(png|jpe?g|gif|webp|bmp|svg|ico|mp4|webm|mov|mkv|mp3|wav|m4a|ogg|flac|opus)$/.test(lower)) continue
+                const key = normPath(full)
+                if (seen.has(key)) continue
+                seen.add(key)
+                const ext = lower.slice(lower.lastIndexOf('.'))
+                let size = 0
+                try { size = nodeFs.statSync(full).size } catch (e) { /* skip */ }
+                if (size <= 0) continue
+                byPath.set(key, {
+                  path: key,
+                  name: f.name,
+                  ext: ext,
+                  kind: mediaKind(ext),
+                  size: size,
+                  firstTurn: workspaceTurn,
+                  turns: [workspaceTurn],
+                  source: 'workspace',
+                })
+              }
+            }
+          }
+          scanDirRec(cwd, 0)
+        } catch (e) { /* workspace scan best-effort */ }
       }
       for (const it of byPath.values()) items.push(it)
       return items
