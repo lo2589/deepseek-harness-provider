@@ -740,11 +740,133 @@ module.exports = {
           }
         },
       })
+      // Native screenshot 路由：用 ctx.subprocess 调 macOS /usr/sbin/screencapture，
+      // 完全绕过浏览器的 getDisplayMedia（避免 macOS 焦点跳选、瀑布拖影、要求
+      // 屏幕录制权限等问题）。Linux/Windows 没有 screencapture，返回 503 让 client
+      // 回退到 getDisplayMedia。
+      const nativeShotDisposer = server.register({
+        kind: 'exact',
+        path: '/plugins/provider-quick-config/native-screenshot',
+        handler: async (req, res) => {
+          const q = queryOf(req.url)
+          const sid = q.session || ''
+          if (sid === '') {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'missing session' }))
+            return
+          }
+          // 解析 mode：region（默认）/ window / full
+          let mode = 'region'
+          let bodyBuf = ''
+          try {
+            for await (const chunk of req) bodyBuf += chunk
+          } catch (e) { /* empty body */ }
+          if (bodyBuf !== '') {
+            try {
+              const parsed = JSON.parse(bodyBuf)
+              if (parsed !== null && typeof parsed === 'object' && typeof parsed.mode === 'string') {
+                mode = parsed.mode
+              }
+            } catch (e) { /* not JSON — ignore */ }
+          }
+          // 平台检查：screencapture 是 macOS 专属
+          if (process.platform !== 'darwin') {
+            res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'native-screenshot only available on macOS' }))
+            return
+          }
+          // 查会话 cwd
+          let cwd = undefined
+          const sq = ctx.get('sessionQuery')
+          if (sq !== undefined && typeof sq.readSession === 'function') {
+            const snap = await sq.readSession(sid)
+            if (snap !== undefined && snap !== null && snap.session !== undefined && snap.session !== null
+              && typeof snap.session.cwd === 'string') cwd = snap.session.cwd
+          }
+          if (cwd === undefined) {
+            res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'session cwd unknown' }))
+            return
+          }
+          // 准备 .screenshots/ 目录
+          let nodeFs
+          try { nodeFs = require('node:fs') } catch (e) { nodeFs = undefined }
+          let nodePath
+          try { nodePath = require('node:path') } catch (e) { nodePath = undefined }
+          if (nodeFs === undefined || nodePath === undefined) {
+            res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'node fs/path unavailable' }))
+            return
+          }
+          const shotDir = nodePath.join(cwd, '.screenshots')
+          try { nodeFs.mkdirSync(shotDir, { recursive: true }) } catch (e) { /* already exists */ }
+          // 取 DSH 不允许的安全字符来构造文件名
+          function pad(n) { return n < 10 ? '0' + n : String(n) }
+          const ts = new Date()
+          const stamp = ts.getFullYear() + pad(ts.getMonth() + 1) + pad(ts.getDate())
+            + '-' + pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds())
+          const target = nodePath.join(shotDir, 'screenshot-' + stamp + '.png')
+          // 调 ctx.subprocess（如果可用）—— 优先 DSH 平台层 spawn，留 fall-back 到 child_process
+          const subp = ctx.get('subprocess')
+          let argv
+          if (mode === 'window') argv = ['screencapture', '-w', '-o', target]
+          else if (mode === 'full') argv = ['screencapture', '-m', '-o', target]
+          else argv = ['screencapture', '-i', '-o', target]
+          try {
+            if (subp !== undefined && typeof subp.spawn === 'function') {
+              const handle = subp.spawn({
+                argv: argv,
+                cwd: cwd,
+                stdio: { stdin: 'ignore', stdout: 'inherit', stderr: 'inherit' },
+                graceMs: 60000,
+              })
+              await handle.done
+            } else {
+              // Fallback：用 node:child_process 直接跑
+              let childProcess
+              try { childProcess = require('node:child_process') } catch (e) { childProcess = undefined }
+              if (childProcess === undefined) {
+                res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' })
+                res.end(JSON.stringify({ error: 'no subprocess + no child_process' }))
+                return
+              }
+              await new Promise(function (resolve, reject) {
+                try {
+                  const child = childProcess.spawn(argv[0], argv.slice(1), {
+                    cwd: cwd,
+                    stdio: 'inherit',
+                    detached: false,
+                  })
+                  child.on('error', reject)
+                  child.on('close', function () { resolve() })
+                } catch (e) { reject(e) }
+              })
+            }
+          } catch (e) {
+            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'screencapture failed: ' + String((e && e.message) || e) }))
+            return
+          }
+          // 验证文件生成
+          try {
+            const st = nodeFs.statSync(target)
+            if (!st.isFile() || st.size <= 0) throw new Error('screenshot file empty')
+          } catch (e) {
+            // 用户按 Esc 取消 / 选窗口超时 → 文件可能没生成
+            res.writeHead(204, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ cancelled: true }))
+            return
+          }
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ path: target, name: 'screenshot-' + stamp + '.png' }))
+        },
+      })
       return () => {
         try { listDisposer() } catch (e) {}
         try { fileDisposer() } catch (e) {}
         try { shotDisposer() } catch (e) {}
         try { uploadDisposer() } catch (e) {}
+        try { nativeShotDisposer() } catch (e) {}
       }
     }
 

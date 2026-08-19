@@ -878,7 +878,46 @@ window.__ModuleLoader__.load({
             })
           } catch (e) { /* fallback best-effort */ }
         }
-        async function shoot() {
+        async function shoot(s) {
+          // 1. 优先尝试 native 截图路由（host 进程调 macOS screencapture）
+          //    macOS 系统级区域选择器，不走浏览器、不抢焦点、不会瀑布、不会截到非 DSH 页面
+          try {
+            if (typeof fetch !== 'undefined' && s !== null && s !== undefined && s.showcaseSession !== null && s.showcaseSession !== undefined) {
+              setBusy(true)
+              toast('正在请求系统截图… macOS 应弹出原生区域选择器')
+              var nativeRes = await fetch(MEDIA_ROUTE + '/native-screenshot?session=' + encodeURIComponent(s.showcaseSession), {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ mode: 'region' }),
+              })
+              if (nativeRes.status === 200) {
+                var nativeBody = await nativeRes.json()
+                if (nativeBody !== null && nativeBody.path !== undefined) {
+                  // 成功：图片由 host 写入 <session cwd>/.screenshots/
+                  // 调 loadShowcase 刷新媒体展示台
+                  setState({ showcaseError: null })
+                  setShowcase(true, s.showcaseSession)
+                  void loadShowcase(s.showcaseSession)
+                  toast('截图已存入多媒体库：' + nativeBody.path)
+                  setBusy(false)
+                  return
+                }
+              } else if (nativeRes.status === 204) {
+                // 用户取消（按 Esc / 选窗口超时）
+                toast('已取消截图')
+                setBusy(false)
+                return
+              } else if (nativeRes.status === 503) {
+                // 平台不支持（Linux/Windows 或无 subprocess）—— 回退到 getDisplayMedia
+                // 不提示，让用户无感回退
+              } else {
+                // 其他错误：回退
+              }
+            }
+          } catch (e) {
+            // 网络错误 / 路由不存在 → 回退到 getDisplayMedia
+          }
+          // 2. 回退路径：浏览器 getDisplayMedia
           if (typeof navigator === 'undefined' || navigator.mediaDevices === undefined
             || navigator.mediaDevices.getDisplayMedia === undefined) {
             toast('截图：此浏览器不支持屏幕捕获（需 HTTPS 或 localhost）')
@@ -1196,7 +1235,7 @@ window.__ModuleLoader__.load({
           })
         }
         return h('button', { type: 'button', className: 'pp-plus pp-shot' + (busy ? ' pp-shot-busy' : ''), title: '截图并插入输入框（顺带存入 .screenshots/）',
-          'aria-label': '截图', onClick: shoot },
+          'aria-label': '截图', onClick: function () { shoot(s) } },
           h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, 'aria-hidden': true },
             h('path', { d: 'M3 4.5h2l1-1.5h4l1 1.5h2a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V6A1.5 1.5 0 0 1 3 4.5Zm5 6.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z', fill: 'currentColor' })))
       }
