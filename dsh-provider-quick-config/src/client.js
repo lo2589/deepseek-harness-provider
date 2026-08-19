@@ -235,19 +235,9 @@ window.__ModuleLoader__.load({
       var store = {
         open: false, view: 'list', busy: false, error: null, notice: null,
         data: null, editing: null, draft: null, confirmKey: null, query: '',
-        // 媒体展示台：开关状态持久化（localStorage），点开一次常驻右侧
+        // 媒体展示台
         showcaseOpen: false, showcaseSession: null, showcaseItems: null, showcaseBusy: false, showcaseError: null,
         showcaseInputActions: null,
-      }
-      try {
-        store.showcaseOpen = localStorage.getItem('pp.showcaseOpen') === '1'
-      } catch (e) { /* storage unavailable */ }
-      function setShowcase(open, sid) {
-        setState({ showcaseOpen: open, showcaseSession: sid !== undefined ? sid : store.showcaseSession })
-        try {
-          if (open) localStorage.setItem('pp.showcaseOpen', '1')
-          else localStorage.removeItem('pp.showcaseOpen')
-        } catch (e) { /* storage unavailable */ }
       }
       var listeners = new Set()
       function setState(patch) { Object.assign(store, patch); listeners.forEach((fn) => fn()) }
@@ -915,7 +905,7 @@ window.__ModuleLoader__.load({
                   var savedSid = (nativeBody !== null && typeof nativeBody.session === 'string') ? nativeBody.session : null
                   setState({ showcaseError: null })
                   if (savedSid !== null) {
-                    setShowcase(true, savedSid)
+                    setState({ showcaseOpen: true, showcaseSession: savedSid })
                     void loadShowcase(savedSid)
                   }
                   toast('截图已存入多媒体库：' + nativeBody.path)
@@ -1049,7 +1039,7 @@ window.__ModuleLoader__.load({
                 savedPath = saved.path
                 setState({ showcaseError: null })
                 // 打开展示台让它立刻可见
-                setShowcase(true, s.showcaseSession)
+                setState({ showcaseOpen: true, showcaseSession: s.showcaseSession })
                 void loadShowcase(s.showcaseSession)
               }
             } catch (e2) { /* save best-effort */ }
@@ -1627,10 +1617,10 @@ window.__ModuleLoader__.load({
           // 常驻侧栏：不设全屏遮罩（overlay 层本身点击穿透），不挡对话框交互
           h('div', { className: 'sc-panel' },
             h('div', { className: 'sc-head' },
-              h('span', { className: 'sc-title' }, '媒体展示台'),
+              h('span', { className: 'sc-title' }, '媒体展示台 [' + String(s.showcaseSession || '?') + ']'),
               h('div', { className: 'sc-tools' },
                 h('button', { type: 'button', className: 'sc-icon-btn', onClick: () => void loadShowcase(s.showcaseSession) }, '刷新'),
-                h('button', { type: 'button', className: 'sc-icon-btn', 'aria-label': '关闭', onClick: () => setShowcase(false) }, '×'))),
+                h('button', { type: 'button', className: 'sc-icon-btn', 'aria-label': '关闭', onClick: () => setState({ showcaseOpen: false }) }, '×'))),
             h('div', { className: 'sc-body' },
               s.showcaseBusy && items.length === 0 ? h('div', { className: 'sc-empty' }, '加载中…') : null,
               s.showcaseError !== null ? h('div', { className: 'sc-empty' }, String(s.showcaseError)) : null,
@@ -1654,7 +1644,7 @@ window.__ModuleLoader__.load({
           className: 'sc-btn' + (s.showcaseOpen ? ' sc-btn-on' : ''),
           'aria-label': '媒体展示台',
           title: '媒体展示台（本会话提到的图片/视频/录音）',
-          onClick: () => { setShowcase(!s.showcaseOpen, sid) },
+          onClick: () => { setState({ showcaseOpen: !s.showcaseOpen, showcaseSession: sid }) },
         }, h('span', { role: 'img', 'aria-hidden': true }, '🎞'))
       }
 
