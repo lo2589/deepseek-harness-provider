@@ -1442,6 +1442,14 @@ window.__ModuleLoader__.load({
       function mediaUrl(sessionId, path) {
         return MEDIA_ROUTE + '/media?session=' + encodeURIComponent(sessionId) + '&p=' + encodeURIComponent(path)
       }
+      // 在文件管理器里高亮指定文件（macOS Finder / Windows Explorer / Linux 文件管理器）
+      function revealFile(path) {
+        if (typeof fetch === 'undefined') return
+        var url = MEDIA_ROUTE + '/reveal-file?p=' + encodeURIComponent(path)
+        fetch(url).then(function (res) {
+          if (!res.ok) toast('打开文件位置失败：HTTP ' + res.status)
+        }).catch(function (e) { toast('打开文件位置失败：' + (e && e.message || e)) })
+      }
       async function loadShowcase(sessionId) {
         if (sessionId === undefined || sessionId === null) return
         setState({ showcaseBusy: true, showcaseError: null })
@@ -1489,7 +1497,11 @@ window.__ModuleLoader__.load({
             // 图片额外支持插入附件
             item.kind === 'image' ? h('button', { type: 'button', className: 'sc-insert',
                 onClick: (e) => { e.stopPropagation(); if (props.onInsert !== undefined) props.onInsert(item) } },
-              '插入对话') : null))
+              '插入对话') : null,
+            // 在文件管理器中显示（macOS open -R / Windows explorer / Linux xdg-open）
+            h('button', { type: 'button', className: 'sc-insert', title: '在文件管理器中显示',
+              onClick: (e) => { e.stopPropagation(); revealFile(item.path) } },
+              '📂')))
       }
       function ShowcasePanel() {
         var s = useStore()

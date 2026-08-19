@@ -861,12 +861,88 @@ module.exports = {
           res.end(JSON.stringify({ path: target, name: 'screenshot-' + stamp + '.png' }))
         },
       })
+      // Reveal 文件路由：在系统文件管理器中高亮显示指定文件（macOS: open -R / Windows: explorer /select / Linux: xdg-open <dir>）
+      const revealDisposer = server.register({
+        kind: 'exact',
+        path: '/plugins/provider-quick-config/reveal-file',
+        handler: async (req, res) => {
+          const q = queryOf(req.url)
+          const p = q.p || ''
+          if (p === '') {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'missing path' }))
+            return
+          }
+          // 解析路径取父目录（macOS open -R 需要文件存在）
+          let absPath = p
+          let nodePath
+          try { nodePath = require('node:path') } catch (e) { nodePath = undefined }
+          let nodeFs
+          try { nodeFs = require('node:fs') } catch (e) { nodeFs = undefined }
+          if (nodePath !== undefined && nodeFs !== undefined) {
+            try {
+              const st = nodeFs.statSync(p)
+              if (st.isDirectory()) {
+                // 传入的是目录，直接打开
+              } else {
+                // 传入的是文件，保留文件路径（open -R 会高亮）
+              }
+            } catch (e) {
+              // 文件不存在 — 尝试拿父目录
+              const parent = nodePath.dirname(p)
+              if (parent !== p) {
+                absPath = parent
+              }
+            }
+          }
+          // 构造 argv
+          const subp = ctx.get('subprocess')
+          let argv
+          if (process.platform === 'darwin') argv = ['open', '-R', absPath]
+          else if (process.platform === 'win32') argv = ['explorer', '/select,', p]
+          else argv = ['xdg-open', absPath]  // Linux: 打开父目录
+          try {
+            if (subp !== undefined && typeof subp.spawn === 'function') {
+              const handle = subp.spawn({
+                argv: argv,
+                cwd: process.cwd(),
+                stdio: { stdin: 'ignore', stdout: 'inherit', stderr: 'inherit' },
+                graceMs: 5000,
+              })
+              // 不 await done（open 类命令很快结束但不阻塞）
+              handle.done.catch(function () { /* open 容错 */ })
+            } else {
+              let childProcess
+              try { childProcess = require('node:child_process') } catch (e) { childProcess = undefined }
+              if (childProcess === undefined) {
+                res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' })
+                res.end(JSON.stringify({ error: 'no subprocess + no child_process' }))
+                return
+              }
+              try {
+                childProcess.spawn(argv[0], argv.slice(1), {
+                  cwd: process.cwd(),
+                  stdio: 'ignore',
+                  detached: true,
+                }).unref()
+              } catch (e) { /* spawn 容错 */ }
+            }
+          } catch (e) {
+            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'reveal failed: ' + String((e && e.message) || e) }))
+            return
+          }
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ ok: true, platform: process.platform, revealed: absPath }))
+        },
+      })
       return () => {
         try { listDisposer() } catch (e) {}
         try { fileDisposer() } catch (e) {}
         try { shotDisposer() } catch (e) {}
         try { uploadDisposer() } catch (e) {}
         try { nativeShotDisposer() } catch (e) {}
+        try { revealDisposer() } catch (e) {}
       }
     }
 
