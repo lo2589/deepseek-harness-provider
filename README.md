@@ -6,7 +6,7 @@
 
 ## Screenshot
 
-![Provider panel screenshot](./assets/screenshot-1.png)
+![Provider panel screenshot](./screenshot/latest-screenshot.png)
 
 ## Two ways to use this plugin
 
@@ -53,6 +53,8 @@ A **+** button next to the **Send** button in the DeepSeek Harness Web GUI. Clic
 - **Media showcase (🎞)**: a persistent right-side panel that scans the current session's history and shows every media file the conversation mentioned — **images (PNG/JPEG/WebP/GIF/AVIF/BMP/SVG/ICO), videos, recordings**. SVG renders natively in `<img>`. Files are resolved from the session's working directory, with a **filename search fallback** (a file whose text reference is missing a path prefix, e.g. `tiile-20260815/x.mp4` actually under `outputs/tiile-20260815/`, is still found). Items are **grouped by conversation turn** ("第 1 轮", "第 2 轮"…). Media data never enters the model context — display only. Each item can **insert its path** into the composer (`inputActions.setDraft`), and raster images can additionally be **inserted as an attachment**. The panel also auto-scans `<cwd>/.uploads/` (SVG/通用上传) and `<cwd>/.screenshots/` (截图库) so files written there appear automatically, grouped into separate "upload library" and "screenshot library" turns.
 - **SVG upload + insert path**: the upload button accepts `.svg` (PNG/JPEG/WebP/GIF still go through as image attachments). SVG files are saved to `<session cwd>/.uploads/<name>` via the new `save-media` endpoint, and the path is appended to the composer as `![name](<abs path>)` — visible inline once sent, and the SVG appears in the media showcase (it can also be dragged or pasted from the file system into `<cwd>/.uploads/` to land in the showcase).
 - **Screenshot 📷**: captures the screen via `getDisplayMedia`, **saves the PNG into `<session cwd>/.screenshots/`** (the media-showcase library folder, gitignored) and writes the returned path into the composer — you decide whether to send it. The saved screenshot automatically appears in the showcase.
+
+![Demo screenshot](./screenshot/latest-screenshot.png)
 - Custom **OpenAI-compatible** providers (any gateway / self-hosted server) with hand-written `api`, `baseURL`, `thinkingFormat`, and model list.
 - Edit / delete existing routes; set or update API keys.
 
